@@ -69,8 +69,20 @@ pecarn  Rule not applicable to this patient
 ```
 
 `all` takes every rule's flags, plus `--rules cchr,noc` to run a subset and
-`--detail` for each rule's full report. Missing inputs are merged into one list
-that names the rules needing each input.
+`--detail` for each rule's full report. It lists only the missing inputs that
+could still change a result, and names the rules that need each one.
+
+### Answer questions one at a time
+
+```bash
+ct-head-rules ask --save answers.json
+```
+
+`ask` puts one question at a time, each with the paper's definition. It asks
+first whether each rule applies, skips rules that don't, and stops once no
+answer could change any result. Press Enter for unknown, or `q` to finish.
+`--save` writes the answers in the `--json` format; `--json FILE` starts from
+earlier answers.
 
 ## Outcomes
 

@@ -24,6 +24,7 @@ from ct_head_rules.api import (
     template,
 )
 from ct_head_rules.findings import Finding
+from ct_head_rules.interview import interview, open_criteria
 from ct_head_rules.rules import CriterionResult, Outcome, RuleResult
 
 __all__ = ["DISCLAIMER", "RULES", "build_parser", "format_text", "main"]
@@ -107,18 +108,39 @@ def build_parser() -> argparse.ArgumentParser:
         description=f"Run every rule on one patient. {DISCLAIMER}",
         epilog=UNKNOWN_EPILOG,
     )
+    _add_rules_argument(every)
     every.add_argument(
+        "--detail", action="store_true", help="add each rule's full report"
+    )
+    _add_input_arguments(every, ALL_INPUTS, "every rule's inputs")
+
+    ask = commands.add_parser(
+        "ask",
+        help="answer questions one at a time; only what can change a result",
+        description=f"Guided interview across the rules. {DISCLAIMER}",
+        epilog="Press Enter for unknown; unknown is never treated as absent.",
+    )
+    _add_rules_argument(ask)
+    ask.add_argument(
+        "--json", type=Path, metavar="FILE", help="start from answers in this file"
+    )
+    ask.add_argument(
+        "--save",
+        type=Path,
+        metavar="FILE",
+        help="save the answers as JSON, for --json later",
+    )
+    return parser
+
+
+def _add_rules_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
         "--rules",
         type=_rule_list,
         default=tuple(RULES),
         metavar="LIST",
         help=f"comma-separated subset of {','.join(RULES)} (default: all)",
     )
-    every.add_argument(
-        "--detail", action="store_true", help="add each rule's full report"
-    )
-    _add_input_arguments(every, ALL_INPUTS, "every rule's inputs")
-    return parser
 
 
 # --- Output ------------------------------------------------------------------
@@ -177,17 +199,18 @@ def _summary_reason(result: RuleResult) -> str:
 
 
 def merged_missing(results: dict[str, RuleResult]) -> dict[str, list[str]]:
-    """Each missing input, with the rules that need it, in Patient field order.
+    """Inputs that could still change a result, with the rules that need them.
 
-    A rule that does not apply is left out: a known exclusion or failed
-    inclusion is final, so its other missing inputs cannot change anything.
+    Inputs that cannot change an outcome are left out, such as those of a rule
+    that does not apply, or lower-tier factors once CT is recommended. Each
+    rule's full list is in its own report (--detail).
     """
     needed: dict[str, list[str]] = {}
     for name, result in results.items():
-        if result.outcome is Outcome.NOT_APPLICABLE:
-            continue
-        for field in result.missing_inputs:
-            needed.setdefault(field, []).append(name)
+        for criterion in open_criteria(result):
+            for field in criterion.missing_inputs:
+                if name not in needed.setdefault(field, []):
+                    needed[field].append(name)
     return {field: needed[field] for field in ALL_INPUTS if field in needed}
 
 
@@ -200,7 +223,7 @@ def format_summary(results: dict[str, RuleResult], detail: bool = False) -> str:
 
     missing = merged_missing(results)
     if missing:
-        lines += ["", "Missing inputs:"]
+        lines += ["", "Missing inputs that could change a result:"]
         lines += [
             f"  - {_flag(field)}: {', '.join(rules)}"
             for field, rules in missing.items()
@@ -233,8 +256,32 @@ def _read_values(args: argparse.Namespace, inputs) -> dict:
     return values
 
 
+def _run_interview(args: argparse.Namespace) -> int:
+    try:
+        values = load_json(args.json) if args.json else {}
+        parse_values(values)
+    except InputError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+
+    try:
+        values = interview(values, args.rules, lambda _, prompt: input(prompt), print)
+    except KeyboardInterrupt:
+        print()
+        return 130
+
+    print()
+    if args.save:
+        args.save.write_text(json.dumps(values, indent=2) + "\n")
+        print(f"Answers saved to {args.save}\n")
+    print(format_summary(evaluate_all(parse_values(values), args.rules)))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.rule == "ask":
+        return _run_interview(args)
     inputs = ALL_INPUTS if args.rule == "all" else RULES[args.rule].inputs
 
     if args.template:

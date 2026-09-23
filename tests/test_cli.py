@@ -420,6 +420,14 @@ def test_all_ignores_missing_inputs_of_rules_that_do_not_apply(capsys):
     assert "--severe-headache" not in out  # PECARN only, and PECARN does not apply
 
 
+def test_all_leaves_out_inputs_that_cannot_change_a_result(capsys):
+    # Age 70 is Canadian high risk: lower-tier factors cannot change that, but
+    # applicability inputs still can.
+    _, out, _ = run(capsys, "--age-years", "70", "--rules", "cchr", rule="all")
+    assert "--pregnant: cchr" in out
+    assert "--retrograde-amnesia-minutes" not in out
+
+
 def test_all_detail_adds_each_rules_full_report(capsys):
     _, out, _ = run(capsys, "--age-years", "70", "--detail", rule="all")
     for spec_title in (
