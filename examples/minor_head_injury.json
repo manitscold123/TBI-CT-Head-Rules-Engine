@@ -24,5 +24,13 @@
   "retrograde_amnesia_minutes": 0,
   "pedestrian_struck_by_motor_vehicle": "absent",
   "ejected_from_motor_vehicle": "absent",
-  "fall_from_height_gt_3ft_or_5_stairs": "absent"
+  "fall_from_height_gt_3ft_or_5_stairs": "absent",
+  "patient_reported_loc": "absent",
+  "amnesia_for_event": "absent",
+  "abnormal_brief_neuro_exam": "absent",
+  "headache": "absent",
+  "drug_or_alcohol_intoxication": "absent",
+  "short_term_memory_deficit": "absent",
+  "trauma_above_clavicles": "absent",
+  "post_traumatic_seizure": "absent"
 }

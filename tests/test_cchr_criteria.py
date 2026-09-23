@@ -6,7 +6,8 @@ Source: Stiell et al. 2001, Lancet 357:1391-96, Panel 1.
 import pytest
 from patients import PRESENT, negative_patient
 
-from ct_head_rules.cchr import CriterionStatus, Outcome, RiskLevel, evaluate_cchr
+from ct_head_rules.cchr import evaluate_cchr
+from ct_head_rules.rules import CriterionStatus, Outcome, RiskLevel
 
 
 def triggered_ids(result) -> set[str]:

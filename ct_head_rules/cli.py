@@ -7,20 +7,19 @@ import argparse
 import dataclasses
 import json
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
-from ct_head_rules.cchr import (
-    CCHRInput,
-    CCHRResult,
-    CriterionResult,
-    Outcome,
-    evaluate_cchr,
-)
+from ct_head_rules.cchr import CCHR_INPUTS, evaluate_cchr
 from ct_head_rules.findings import Finding
+from ct_head_rules.noc import NOC_INPUTS, evaluate_noc
+from ct_head_rules.patient import Patient
+from ct_head_rules.rules import CriterionResult, Outcome, RuleResult
 
 DISCLAIMER = "Educational use only. NOT for clinical use."
 
-FIELDS = dataclasses.fields(CCHRInput)
+FIELDS = {field.name: field for field in dataclasses.fields(Patient)}
 FINDING_VALUES = [finding.value for finding in Finding]
 
 OUTCOME_LABELS = {
@@ -31,8 +30,27 @@ OUTCOME_LABELS = {
 }
 
 
+@dataclass(frozen=True)
+class RuleSpec:
+    title: str
+    evaluate: Callable[[Patient], RuleResult]
+    inputs: tuple[str, ...]
+
+
+RULES = {
+    "cchr": RuleSpec(
+        "Canadian CT Head Rule (Stiell et al., Lancet 2001)", evaluate_cchr, CCHR_INPUTS
+    ),
+    "noc": RuleSpec(
+        "New Orleans Criteria (Haydel et al., N Engl J Med 2000)",
+        evaluate_noc,
+        NOC_INPUTS,
+    ),
+}
+
+
 class InputError(Exception):
-    """Patient input that cannot be turned into a CCHRInput."""
+    """Patient input that cannot be turned into a Patient."""
 
 
 def _flag(name: str) -> str:
@@ -45,32 +63,40 @@ def build_parser() -> argparse.ArgumentParser:
         description=f"Clinical decision rules for head CT imaging. {DISCLAIMER}",
     )
     rules = parser.add_subparsers(dest="rule", required=True, metavar="RULE")
-    cchr = rules.add_parser(
-        "cchr",
-        help="Canadian CT Head Rule (Stiell et al., Lancet 2001)",
-        description=f"Canadian CT Head Rule (Stiell et al., Lancet 2001). {DISCLAIMER}",
-        epilog="Any finding not given is treated as unknown, never as absent.",
-    )
-    cchr.add_argument(
-        "--json",
-        type=Path,
-        metavar="FILE",
-        help="patient findings as a JSON object; flags override values in it",
-    )
-    cchr.add_argument("--format", choices=["text", "json"], default="text")
-    cchr.add_argument(
-        "--template",
-        action="store_true",
-        help="print a JSON template with every finding unknown, then exit",
-    )
+    for name, spec in RULES.items():
+        rule = rules.add_parser(
+            name,
+            help=spec.title,
+            description=f"{spec.title}. {DISCLAIMER}",
+            epilog="Any finding not given is treated as unknown, never as absent.",
+        )
+        rule.add_argument(
+            "--json",
+            type=Path,
+            metavar="FILE",
+            help="patient findings as a JSON object (any rule's fields); "
+            "flags override values in it",
+        )
+        rule.add_argument("--format", choices=["text", "json"], default="text")
+        rule.add_argument(
+            "--template",
+            action="store_true",
+            help="print a JSON template of this rule's inputs, all unknown, then exit",
+        )
 
-    findings = cchr.add_argument_group("patient findings")
-    for field in FIELDS:
-        if field.type is Finding:
-            findings.add_argument(_flag(field.name), choices=FINDING_VALUES)
-        else:
-            number = int if field.type == int | None else float
-            findings.add_argument(_flag(field.name), type=number, metavar="N")
+        findings = rule.add_argument_group("patient findings")
+        for field_name in spec.inputs:
+            field = FIELDS[field_name]
+            help_text = field.metadata["help"]
+            if field.type is Finding:
+                findings.add_argument(
+                    _flag(field_name), choices=FINDING_VALUES, help=help_text
+                )
+            else:
+                number = int if field.type == int | None else float
+                findings.add_argument(
+                    _flag(field_name), type=number, metavar="N", help=help_text
+                )
     return parser
 
 
@@ -84,37 +110,35 @@ def _load_json(path: Path) -> dict:
     if not isinstance(data, dict):
         raise InputError(f"{path} must contain a JSON object")
 
-    unrecognised = sorted(set(data) - {field.name for field in FIELDS})
+    unrecognised = sorted(set(data) - set(FIELDS))
     if unrecognised:
         raise InputError(f"{path}: unrecognised field(s): {', '.join(unrecognised)}")
     return data
 
 
-def _to_input(values: dict) -> CCHRInput:
+def _to_input(values: dict) -> Patient:
     kwargs = {}
-    for field in FIELDS:
-        value = values.get(field.name)
-        if field.type is not Finding:
-            kwargs[field.name] = value
+    for name, value in values.items():
+        if FIELDS[name].type is not Finding:
+            kwargs[name] = value
         elif value is None:
-            kwargs[field.name] = Finding.UNKNOWN
+            kwargs[name] = Finding.UNKNOWN
         elif isinstance(value, str) and value in FINDING_VALUES:
-            kwargs[field.name] = Finding(value)
+            kwargs[name] = Finding(value)
         else:
             raise InputError(
-                f"{field.name} must be one of {', '.join(FINDING_VALUES)}, "
-                f"got {value!r}"
+                f"{name} must be one of {', '.join(FINDING_VALUES)}, got {value!r}"
             )
     try:
-        return CCHRInput(**kwargs)
+        return Patient(**kwargs)
     except (TypeError, ValueError) as error:
         raise InputError(str(error)) from error
 
 
-def _template() -> dict:
+def _template(inputs: tuple[str, ...]) -> dict:
     return {
-        field.name: Finding.UNKNOWN.value if field.type is Finding else None
-        for field in FIELDS
+        name: Finding.UNKNOWN.value if FIELDS[name].type is Finding else None
+        for name in inputs
     }
 
 
@@ -130,10 +154,10 @@ def _criterion_json(criterion: CriterionResult) -> dict:
     }
 
 
-def format_json(result: CCHRResult) -> str:
+def format_json(result: RuleResult) -> str:
     return json.dumps(
         {
-            "rule": "cchr",
+            "rule": result.rule,
             "disclaimer": DISCLAIMER,
             "outcome": result.outcome.value,
             "risk_level": result.risk_level.value if result.risk_level else None,
@@ -147,7 +171,7 @@ def format_json(result: CCHRResult) -> str:
     )
 
 
-def format_text(result: CCHRResult) -> str:
+def format_text(result: RuleResult) -> str:
     outcome = OUTCOME_LABELS[result.outcome]
     if result.risk_level:
         outcome += f" ({result.risk_level.value} risk)"
@@ -169,7 +193,7 @@ def format_text(result: CCHRResult) -> str:
         ("Notes", list(result.notes)),
     ]
 
-    lines = ["Canadian CT Head Rule (Stiell et al., Lancet 2001)", DISCLAIMER, ""]
+    lines = [RULES[result.rule].title, DISCLAIMER, ""]
     lines.append(f"Outcome: {outcome}")
     for title, items in sections:
         if items:
@@ -179,22 +203,23 @@ def format_text(result: CCHRResult) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    spec = RULES[args.rule]
 
     if args.template:
-        print(json.dumps(_template(), indent=2))
+        print(json.dumps(_template(spec.inputs), indent=2))
         return 0
 
     try:
         values = _load_json(args.json) if args.json else {}
-        for field in FIELDS:
-            flag_value = getattr(args, field.name)
+        for name in spec.inputs:
+            flag_value = getattr(args, name)
             if flag_value is not None:
-                values[field.name] = flag_value
+                values[name] = flag_value
         patient = _to_input(values)
     except InputError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
 
-    result = evaluate_cchr(patient)
+    result = spec.evaluate(patient)
     print(format_json(result) if args.format == "json" else format_text(result))
     return 0

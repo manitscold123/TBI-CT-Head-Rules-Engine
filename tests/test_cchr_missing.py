@@ -5,37 +5,44 @@ import dataclasses
 import pytest
 from patients import ABSENT, PRESENT, UNKNOWN, negative_patient
 
-from ct_head_rules.cchr import (
-    CCHRInput,
-    CriterionStatus,
-    Outcome,
-    RiskLevel,
-    evaluate_cchr,
-)
+from ct_head_rules.cchr import CCHR_INPUTS, evaluate_cchr
 from ct_head_rules.findings import Finding
+from ct_head_rules.patient import Patient
+from ct_head_rules.rules import CriterionStatus, Outcome, RiskLevel
 
 # Definite amnesia and witnessed disorientation are alternatives to witnessed
 # LOC, which the negative patient already has, so leaving them unknown cannot
 # change the result. They get their own test below.
 REDUNDANT_WHEN_LOC_PRESENT = {"definite_amnesia", "witnessed_disorientation"}
 
+FIELDS = {f.name: f for f in dataclasses.fields(Patient)}
 
-def missing_value(field: dataclasses.Field):
-    return UNKNOWN if field.type is Finding else None
+
+def missing_value(name: str):
+    return UNKNOWN if FIELDS[name].type is Finding else None
 
 
 DECISIVE_FIELDS = [
-    f for f in dataclasses.fields(CCHRInput) if f.name not in REDUNDANT_WHEN_LOC_PRESENT
+    name for name in CCHR_INPUTS if name not in REDUNDANT_WHEN_LOC_PRESENT
 ]
+NEW_ORLEANS_ONLY = [name for name in FIELDS if name not in CCHR_INPUTS]
 
 
-@pytest.mark.parametrize("field", DECISIVE_FIELDS, ids=lambda f: f.name)
-def test_missing_input_on_negative_patient_is_indeterminate(field):
-    result = evaluate_cchr(negative_patient(**{field.name: missing_value(field)}))
+@pytest.mark.parametrize("name", DECISIVE_FIELDS)
+def test_missing_input_on_negative_patient_is_indeterminate(name):
+    result = evaluate_cchr(negative_patient(**{name: missing_value(name)}))
 
     assert result.outcome is Outcome.INDETERMINATE
     assert result.risk_level is None
-    assert result.missing_inputs == (field.name,)
+    assert result.missing_inputs == (name,)
+
+
+@pytest.mark.parametrize("name", NEW_ORLEANS_ONLY)
+def test_fields_the_rule_does_not_use_are_never_reported_missing(name):
+    result = evaluate_cchr(negative_patient(**{name: missing_value(name)}))
+
+    assert result.outcome is Outcome.CT_NOT_REQUIRED
+    assert result.missing_inputs == ()
 
 
 @pytest.mark.parametrize("field", sorted(REDUNDANT_WHEN_LOC_PRESENT))
@@ -116,11 +123,10 @@ def test_known_exclusion_wins_over_missing_inputs():
 
 
 def test_everything_unknown_is_indeterminate():
-    unknowns = {f.name: missing_value(f) for f in dataclasses.fields(CCHRInput)}
-    result = evaluate_cchr(CCHRInput(**unknowns))
+    result = evaluate_cchr(Patient())
 
     assert result.outcome is Outcome.INDETERMINATE
-    assert set(result.missing_inputs) == set(unknowns)
+    assert result.missing_inputs == CCHR_INPUTS
 
 
 # --- Inputs that could be silently read as negative are rejected -------------

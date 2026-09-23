@@ -5,16 +5,18 @@ import json
 from pathlib import Path
 
 import pytest
-from patients import negative_patient
+from patients import PRESENT, negative_patient
 
-from ct_head_rules.cchr import CCHRInput
+from ct_head_rules.cchr import CCHR_INPUTS
 from ct_head_rules.cli import DISCLAIMER, main
 from ct_head_rules.findings import Finding
+from ct_head_rules.noc import NOC_INPUTS
+from ct_head_rules.patient import Patient
 
-ALL_FIELDS = [f.name for f in dataclasses.fields(CCHRInput)]
+ALL_FIELDS = list(CCHR_INPUTS)  # the default rule in these tests is cchr
 
 
-def as_json(patient: CCHRInput) -> dict:
+def as_json(patient: Patient) -> dict:
     return {
         name: value.value if isinstance(value, Finding) else value
         for name, value in dataclasses.asdict(patient).items()
@@ -31,16 +33,22 @@ def patient_file(tmp_path):
     return write
 
 
-def run(capsys, *argv: str) -> tuple[int, str, str]:
-    code = main(["cchr", *argv])
+def run(capsys, *argv: str, rule: str = "cchr") -> tuple[int, str, str]:
+    code = main([rule, *argv])
     out, err = capsys.readouterr()
     return code, out, err
 
 
-def run_json(capsys, *argv: str) -> dict:
-    code, out, _ = run(capsys, *argv, "--format", "json")
+def run_json(capsys, *argv: str, rule: str = "cchr") -> dict:
+    code, out, _ = run(capsys, *argv, "--format", "json", rule=rule)
     assert code == 0
     return json.loads(out)
+
+
+def help_text(capsys, rule: str) -> str:
+    with pytest.raises(SystemExit):
+        main([rule, "--help"])
+    return capsys.readouterr().out
 
 
 # --- Flags -------------------------------------------------------------------
@@ -180,18 +188,68 @@ def test_unfilled_template_is_accepted_and_indeterminate(capsys, patient_file):
 
 
 @pytest.mark.parametrize(
-    ("example", "outcome"),
+    ("rule", "example", "outcome"),
     [
-        ("minor_head_injury.json", "ct_not_required"),
-        ("on_warfarin.json", "not_applicable"),
+        ("cchr", "minor_head_injury.json", "ct_not_required"),
+        ("cchr", "on_warfarin.json", "not_applicable"),
+        ("noc", "minor_head_injury.json", "ct_not_required"),
+        ("noc", "on_warfarin.json", "ct_recommended"),  # age over 60
     ],
 )
-def test_readme_example_files_give_documented_outcome(capsys, example, outcome):
+def test_readme_example_files_give_documented_outcome(capsys, rule, example, outcome):
     path = Path(__file__).parent.parent / "examples" / example
-    result = run_json(capsys, "--json", str(path))
+    result = run_json(capsys, "--json", str(path), rule=rule)
 
+    assert result["rule"] == rule
     assert result["outcome"] == outcome
     assert result["missing_inputs"] == []
+
+
+# --- New Orleans Criteria ----------------------------------------------------
+
+
+def test_noc_gcs_14_is_not_applicable(capsys):
+    result = run_json(capsys, "--initial-ed-gcs", "14", rule="noc")
+
+    assert result["outcome"] == "not_applicable"
+    assert result["exclusion_reasons"] == ["noc.inclusion.gcs_15"]
+
+
+def test_one_json_file_works_for_both_rules(capsys, patient_file):
+    path = patient_file(as_json(negative_patient(headache=PRESENT)))
+    # headache is a New Orleans finding and is ignored by the Canadian rule.
+    assert run_json(capsys, "--json", path)["outcome"] == "ct_not_required"
+    assert run_json(capsys, "--json", path, rule="noc")["triggered"] == [
+        "noc.finding.headache"
+    ]
+
+
+def test_each_rule_offers_only_its_own_flags(capsys):
+    noc_help = help_text(capsys, "noc")
+    cchr_help = help_text(capsys, "cchr")
+
+    assert "--headache" in noc_help and "--battle-sign" not in noc_help
+    assert "--battle-sign" in cchr_help and "--headache" not in cchr_help
+
+
+def test_help_shows_each_fields_definition(capsys):
+    noc_help = help_text(capsys, "noc")
+    assert "anterograde" in noc_help  # short-term memory deficit
+    assert "Haydel" in noc_help
+
+
+def test_noc_template_lists_only_new_orleans_inputs(capsys):
+    _, out, _ = run(capsys, "--template", rule="noc")
+    assert list(json.loads(out)) == list(NOC_INPUTS)
+
+
+def test_noc_text_output_has_its_own_title_and_no_tier(capsys):
+    code, out, _ = run(capsys, "--headache", "present", rule="noc")
+
+    assert code == 0
+    assert "New Orleans Criteria (Haydel et al., N Engl J Med 2000)" in out
+    assert DISCLAIMER in out
+    assert "Outcome: CT recommended\n" in out
 
 
 # --- Output ------------------------------------------------------------------

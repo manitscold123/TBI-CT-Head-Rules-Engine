@@ -7,7 +7,8 @@ population" (pp1391-92), and the Panel 1 footnote defining minor head injury.
 import pytest
 from patients import ABSENT, PRESENT, negative_patient
 
-from ct_head_rules.cchr import CriterionStatus, Outcome, evaluate_cchr
+from ct_head_rules.cchr import evaluate_cchr
+from ct_head_rules.rules import CriterionStatus, Outcome
 
 
 def reason_ids(result) -> set[str]:
