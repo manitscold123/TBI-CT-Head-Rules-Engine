@@ -20,6 +20,9 @@ ct-head-rules = "ct_head_rules.cli:main"
 [tool.setuptools]
 packages = ["ct_head_rules"]
 
+[tool.setuptools.package-data]
+ct_head_rules = ["web_page.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = [".", "tests"]

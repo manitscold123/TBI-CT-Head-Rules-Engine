@@ -84,6 +84,17 @@ answer could change any result. Press Enter for unknown, or `q` to finish.
 `--save` writes the answers in the `--json` format; `--json FILE` starts from
 earlier answers.
 
+### Local web form
+
+```bash
+ct-head-rules serve        # then open http://127.0.0.1:8000
+```
+
+One page shows the three rules side by side and updates as you answer. Inputs
+that could still change a result are highlighted, and "Only what's still
+needed" hides the rest. Import and Export use the same JSON as `--json`. It
+runs on your machine only, with no external scripts, and listens on 127.0.0.1.
+
 ## Outcomes
 
 | Outcome | When |
