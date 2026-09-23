@@ -150,3 +150,12 @@ def test_triggered_criterion_reports_inputs_used():
     result = evaluate_cchr(negative_patient(battle_sign=PRESENT))
     (criterion,) = result.triggered
     assert "battle_sign" in criterion.inputs_used
+
+
+def test_gcs_at_2h_given_before_2h_have_passed_is_flagged():
+    from ct_head_rules.cchr import NOTE_GCS_2H_EARLY
+
+    result = evaluate_cchr(negative_patient(hours_since_injury=0.25))
+    assert result.outcome is Outcome.CT_NOT_REQUIRED
+    assert NOTE_GCS_2H_EARLY in result.notes
+    assert NOTE_GCS_2H_EARLY not in evaluate_cchr(negative_patient()).notes

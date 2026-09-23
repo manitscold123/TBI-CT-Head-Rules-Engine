@@ -11,6 +11,7 @@ page plus two JSON endpoints:
 """
 
 import json
+import sys
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
@@ -134,8 +135,18 @@ class Handler(BaseHTTPRequestHandler):
         if url.path != "/api/evaluate":
             return self._error(HTTPStatus.NOT_FOUND, "not found")
 
+        # A page on another site can only send a "simple" POST (text/plain,
+        # a form) without a CORS preflight; this endpoint takes JSON only.
+        content_type = self.headers.get("Content-Type")
+        if content_type is not None and (
+            content_type.split(";")[0].strip().lower() != "application/json"
+        ):
+            self.close_connection = True
+            return self._error(
+                HTTPStatus.UNSUPPORTED_MEDIA_TYPE, "send application/json"
+            )
         length_header = self.headers.get("Content-Length", "0").strip() or "0"
-        if not length_header.isdigit():
+        if not (length_header.isascii() and length_header.isdigit()):
             self.close_connection = True
             return self._error(HTTPStatus.BAD_REQUEST, "invalid Content-Length")
         length = int(length_header)
@@ -144,7 +155,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "body too large")
         try:
             values = json.loads(self.rfile.read(length) or b"{}")
-        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        except UnicodeDecodeError:
+            return self._error(HTTPStatus.BAD_REQUEST, "body is not UTF-8")
+        except ValueError as error:  # includes JSONDecodeError and huge integers
             return self._error(HTTPStatus.BAD_REQUEST, f"not valid JSON: {error}")
         except RecursionError:
             return self._error(HTTPStatus.BAD_REQUEST, "JSON is nested too deeply")
@@ -169,7 +182,11 @@ def make_server(port: int = 8000) -> ThreadingHTTPServer:
 
 
 def serve(port: int = 8000) -> int:
-    httpd = make_server(port)
+    try:
+        httpd = make_server(port)
+    except OSError as error:
+        print(f"error: cannot listen on port {port}: {error.strerror}", file=sys.stderr)
+        return 2
     print(DISCLAIMER)
     print(f"Serving on http://{HOST}:{httpd.server_address[1]}/  (Ctrl-C to stop)")
     try:

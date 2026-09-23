@@ -265,3 +265,35 @@ def test_body_shorter_than_its_content_length_does_not_hold_the_server(server):
         )
         # Meanwhile the server still answers other requests.
         assert request(server, "GET", "/api/fields")[0].status == 200
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b'{"vomiting_episodes": 1' + b"0" * 400 + b"}",
+        b'{"age_years": 1' + b"0" * 5000 + b"}",
+    ],
+)
+def test_huge_numbers_are_400(server, body):
+    response, _ = request(server, "POST", "/api/evaluate", body)
+    assert response.status == 400
+
+
+def test_non_ascii_digit_content_length_is_400(server):
+    import socket
+
+    host, port = server.server_address[:2]
+    with socket.create_connection((host, port), timeout=5) as sock:
+        sock.sendall(
+            b"POST /api/evaluate HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+            b"Content-Length: \xb2\r\n\r\n{}"
+        )
+        assert sock.recv(64).startswith(b"HTTP/1.0 400")
+
+
+def test_cross_site_simple_post_is_refused(server):
+    # A page elsewhere can send text/plain without a CORS preflight.
+    response, _ = request(
+        server, "POST", "/api/evaluate", b"{}", {"Content-Type": "text/plain"}
+    )
+    assert response.status == 415

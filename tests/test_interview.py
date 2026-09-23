@@ -271,3 +271,9 @@ def test_non_finite_answer_is_asked_again(answer):
 
     assert script.asked.count("fall_height_m") == 2
     assert values["fall_height_m"] == 0
+
+
+def test_huge_number_answer_is_asked_again():
+    script = Script({"age_years": "30", "vomiting_episodes": ["1" + "0" * 400, "0"]})
+    values = run(script, rules=("noc",))
+    assert values["vomiting_episodes"] == 0

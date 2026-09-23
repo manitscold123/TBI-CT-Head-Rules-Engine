@@ -45,3 +45,16 @@ def test_non_finite_numbers_are_rejected(name, value):
     # NaN compares false with everything, so it would act as a negative.
     with pytest.raises(ValueError, match=name):
         Patient(**{name: value})
+
+
+def test_integer_too_large_for_a_float_is_rejected():
+    with pytest.raises(ValueError, match="vomiting_episodes"):
+        Patient(vomiting_episodes=10**400)
+
+
+def test_paediatric_gcs_help_follows_panel_1():
+    # Kuppermann 2009, Panel 1 (p1161): paediatric GCS for "children aged 2
+    # years or younger", standard GCS for "patients older than 2 years".
+    fields = {f.name: f for f in dataclasses.fields(Patient)}
+    help_text = fields["initial_ed_gcs"].metadata["help"]
+    assert "2 or younger" in help_text

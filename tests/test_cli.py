@@ -475,3 +475,65 @@ def test_deeply_nested_json_file_is_an_input_error(capsys, tmp_path):
     code, _, err = run(capsys, "--json", str(path))
     assert code == 2
     assert "deep.json" in err
+
+
+def test_huge_integer_flag_is_an_input_error(capsys):
+    code, _, err = run(capsys, "--vomiting-episodes", "1" + "0" * 400, rule="noc")
+    assert code == 2
+    assert "vomiting_episodes" in err
+
+
+@pytest.mark.parametrize(
+    ("content", "name"),
+    [
+        (b'{"headache": "\xff"}', "latin1.json"),
+        (b'{"age_years": 1' + b"0" * 5000 + b"}", "digits.json"),
+    ],
+)
+def test_unreadable_json_content_is_an_input_error(capsys, tmp_path, content, name):
+    path = tmp_path / name
+    path.write_bytes(content)
+    code, _, err = run(capsys, "--json", str(path), rule="all")
+    assert code == 2
+    assert name in err
+
+
+def test_ask_refuses_an_unwritable_save_path_before_asking(
+    capsys, tmp_path, monkeypatch
+):
+    def no_input(prompt=""):
+        raise AssertionError("asked a question before checking --save")
+
+    monkeypatch.setattr("builtins.input", no_input)
+    code = main(["ask", "--save", str(tmp_path / "missing" / "x.json")])
+    assert code == 2
+    assert "missing" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("port", ["99999", "-1"])
+def test_serve_rejects_an_invalid_port(capsys, port):
+    with pytest.raises(SystemExit):
+        main(["serve", "--port", port])
+    assert "port" in capsys.readouterr().err
+
+
+def test_serve_reports_a_port_in_use(capsys):
+    import socket
+
+    with socket.socket() as taken:
+        taken.bind(("127.0.0.1", 0))
+        taken.listen()
+        code = main(["serve", "--port", str(taken.getsockname()[1])])
+    assert code == 2
+    assert "error" in capsys.readouterr().err
+
+
+def test_ask_prints_the_answers_when_saving_fails(capsys, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "builtins.input", lambda prompt="": "72" if "age_years" in prompt else "q"
+    )
+    code = main(["ask", "--save", str(tmp_path)])  # a directory, not a file
+    out, err = capsys.readouterr()
+    assert code == 2
+    assert "cannot save" in err
+    assert '"age_years": 72' in out

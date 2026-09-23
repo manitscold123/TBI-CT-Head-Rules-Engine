@@ -45,6 +45,16 @@ def _finding_arg(value: str) -> str:
         raise argparse.ArgumentTypeError(str(error)) from None
 
 
+def _port(value: str) -> int:
+    try:
+        port = int(value)
+    except ValueError:
+        port = -1
+    if not 0 <= port <= 65535:
+        raise argparse.ArgumentTypeError(f"port must be 0-65535, got {value!r}")
+    return port
+
+
 def _rule_list(value: str) -> tuple[str, ...]:
     names = tuple(name.strip() for name in value.split(",") if name.strip())
     unknown = [name for name in names if name not in RULES]
@@ -138,7 +148,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="open a local web form showing every rule side by side",
         description=f"Local web form on 127.0.0.1. {DISCLAIMER}",
     )
-    serve.add_argument("--port", type=int, default=8000, help="default: 8000")
+    serve.add_argument("--port", type=_port, default=8000, help="default: 8000")
     return parser
 
 
@@ -230,6 +240,8 @@ def _run_interview(args: argparse.Namespace) -> int:
     try:
         values = load_json(args.json) if args.json else {}
         parse_values(values)
+        if args.save and not args.save.parent.is_dir():
+            raise InputError(f"cannot save to {args.save}: no such directory")
     except InputError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
@@ -241,11 +253,21 @@ def _run_interview(args: argparse.Namespace) -> int:
         return 130
 
     print()
+    status = 0
     if args.save:
-        args.save.write_text(json.dumps(values, indent=2) + "\n")
-        print(f"Answers saved to {args.save}\n")
+        answers = json.dumps(values, indent=2) + "\n"
+        try:
+            args.save.write_text(answers)
+            print(f"Answers saved to {args.save}\n")
+        except OSError as error:
+            # Keep the answers: print them rather than lose the interview.
+            print(
+                f"error: cannot save to {args.save}: {error.strerror}", file=sys.stderr
+            )
+            print(answers)
+            status = 2
     print(format_summary(evaluate_all(parse_values(values), args.rules)))
-    return 0
+    return status
 
 
 def main(argv: list[str] | None = None) -> int:

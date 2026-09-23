@@ -57,7 +57,7 @@ class Patient:
     initial_ed_gcs: int | None = _number(
         f"GCS on arrival in the ED. {STIELL}: 13-15 eligible. "
         f"{HAYDEL}: must be 15 (p101). {KUPPERMANN}: 14-15; use the paediatric "
-        f"GCS under 2 (p1161)."
+        f"GCS at 2 or younger (p1161)."
     )
     hours_since_injury: float | None = _number(
         f"Hours since injury; all rules need 24 or less ({STIELL} p1392; "
@@ -234,7 +234,11 @@ class Patient:
                     )
                 # NaN compares false with every threshold, so it would act as
                 # a negative finding; infinity is not a measurement.
-                if not math.isfinite(value):
+                try:
+                    finite = math.isfinite(value)
+                except OverflowError:  # an integer too large for a float
+                    finite = False
+                if not finite:
                     raise ValueError(f"{field.name} must be finite, got {value}")
                 if value < 0:
                     raise ValueError(f"{field.name} must not be negative, got {value}")

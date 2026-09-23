@@ -59,6 +59,7 @@
     background: var(--ct-soft); color: var(--ct); border: 1px solid var(--ct);
   }
   .error.show { display: block; }
+  #cards.stale .card { opacity: .35; filter: grayscale(1); }
   .next {
     margin-bottom: 14px; padding: 10px 12px; border-radius: var(--radius);
     background: var(--accent-soft); display: flex; gap: 10px; align-items: center;
@@ -131,6 +132,7 @@
 </header>
 <main class="layout">
   <aside class="results" aria-live="polite">
+    <div class="error" id="stale" role="status"></div>
     <div id="cards"></div>
   </aside>
   <div>
@@ -174,6 +176,10 @@ function label(name) {
 function showError(message) {
   $("error").textContent = message || "";
   $("error").classList.toggle("show", Boolean(message));
+  // Results from the last valid input must not pass for current ones.
+  $("stale").textContent = message ? `Out of date: ${message}. Fix the input to update.` : "";
+  $("stale").classList.toggle("show", Boolean(message));
+  $("cards").classList.toggle("stale", Boolean(message));
 }
 
 function blankValues() {
@@ -375,7 +381,7 @@ async function importJson(file) {
     state.values = { ...blankValues(), ...data };
     for (const [name, value] of Object.entries(data)) {
       const field = state.fields.find((f) => f.name === name);
-      if (field.type === "finding") state.values[name] = value == null ? "unknown" : String(value).toLowerCase();
+      if (field.type === "finding") state.values[name] = value == null ? "unknown" : String(value).trim().toLowerCase();
     }
     normaliseFindings();
     syncControls();

@@ -82,10 +82,12 @@ def parse_finding(value: str) -> Finding:
 
 def load_json(path: Path) -> dict:
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_bytes())
     except OSError as error:
         raise InputError(f"cannot read {path}: {error.strerror}") from error
-    except json.JSONDecodeError as error:
+    except UnicodeDecodeError:
+        raise InputError(f"{path} is not UTF-8 text") from None
+    except ValueError as error:  # includes JSONDecodeError and huge integers
         raise InputError(f"{path} is not valid JSON: {error}") from error
     except RecursionError:
         raise InputError(f"{path} is nested too deeply to be patient data") from None

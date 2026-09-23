@@ -266,6 +266,10 @@ NOTE_MEDIUM_RISK = (
 NOTE_HIGH_RISK_UNKNOWN = (
     "Some high risk criteria are unknown; if any is met, the risk level is high."
 )
+NOTE_GCS_2H_EARLY = (
+    "GCS at 2 h was given, but fewer than 2 h have passed since injury: check "
+    "the timing (Stiell 2001, Panel 1: GCS <15 at 2 h after injury)."
+)
 NOTE_GCS_2H_PENDING = (
     "Fewer than 2 h since injury, so GCS at 2 h is not yet known: "
     "re-evaluate at 2 h post-injury."
@@ -292,6 +296,12 @@ def evaluate_cchr(patient: Patient) -> RuleResult:
         and patient.hours_since_injury < 2
     ):
         notes.append(NOTE_GCS_2H_PENDING)
+    if (
+        patient.gcs_2h_post_injury is not None
+        and patient.hours_since_injury is not None
+        and patient.hours_since_injury < 2
+    ):
+        notes.append(NOTE_GCS_2H_EARLY)
     if result.outcome is Outcome.NOT_APPLICABLE:
         notes.append(NOTE_NOT_APPLICABLE)
     if result.risk_level is RiskLevel.MEDIUM:
