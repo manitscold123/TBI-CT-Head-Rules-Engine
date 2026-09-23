@@ -23,6 +23,9 @@ class RiskLevel(Enum):
 
 class Outcome(Enum):
     CT_RECOMMENDED = "ct_recommended"
+    # PECARN's middle group: "observation versus CT on the basis of other
+    # clinical factors" (Kuppermann 2009, Figure 3, p1168).
+    OBSERVATION_OR_CT = "observation_or_ct"
     CT_NOT_REQUIRED = "ct_not_required"  # only when every relevant input is known
     NOT_APPLICABLE = "not_applicable"  # excluded, or outside the rule's population
     INDETERMINATE = "indeterminate"  # missing inputs prevent a conclusion
@@ -53,10 +56,10 @@ class CriterionResult:
 
 @dataclass(frozen=True)
 class RuleResult:
-    rule: str  # "cchr" or "noc"
+    rule: str  # "cchr", "noc" or "pecarn"
     outcome: Outcome
-    risk_level: RiskLevel | None  # only for tiered rules, when CT_RECOMMENDED
-    triggered: tuple[CriterionResult, ...]  # met risk criteria, if CT_RECOMMENDED
+    risk_level: RiskLevel | None  # tiered rules only, when a tier is met
+    triggered: tuple[CriterionResult, ...]  # met risk criteria, when a tier is met
     exclusion_reasons: tuple[CriterionResult, ...]  # why the rule does not apply
     criteria: tuple[CriterionResult, ...]  # every criterion checked, for audit
     missing_inputs: tuple[str, ...]  # in Patient field order
@@ -78,14 +81,18 @@ def _from_finding(value: Finding) -> CriterionStatus:
     return CriterionStatus.UNKNOWN
 
 
-def _any_of(*values: Finding) -> CriterionStatus:
-    """MET if any is present; NOT_MET only if every one is known absent."""
-    statuses = [_from_finding(v) for v in values]
+def _either(*statuses: CriterionStatus) -> CriterionStatus:
+    """MET if any is met; NOT_MET only if every one is known not met."""
     if CriterionStatus.MET in statuses:
         return CriterionStatus.MET
     if all(s is CriterionStatus.NOT_MET for s in statuses):
         return CriterionStatus.NOT_MET
     return CriterionStatus.UNKNOWN
+
+
+def _any_of(*values: Finding) -> CriterionStatus:
+    """MET if any is present; NOT_MET only if every one is known absent."""
+    return _either(*(_from_finding(v) for v in values))
 
 
 def _present_implies(primary: Finding, *implying: Finding) -> CriterionStatus:
@@ -154,19 +161,20 @@ def decide(
     patient: Patient,
     inclusions: tuple[_Criterion, ...],
     exclusions: tuple[_Criterion, ...],
-    tiers: tuple[tuple[RiskLevel | None, tuple[_Criterion, ...]], ...],
+    tiers: tuple[tuple[RiskLevel | None, Outcome, tuple[_Criterion, ...]], ...],
 ) -> RuleResult:
     """The decision steps every rule shares. Rules add their own notes after.
 
-    `tiers` lists the risk criteria from highest tier to lowest; a rule with a
-    single tier passes one tier with level None.
+    `tiers` lists the risk criteria from highest tier to lowest, each with the
+    outcome it leads to. A rule with a single tier passes level None.
     """
     inclusion_results = tuple(c.apply(patient) for c in inclusions)
     exclusion_results = tuple(c.apply(patient) for c in exclusions)
     tier_results = tuple(
-        (level, tuple(c.apply(patient) for c in criteria)) for level, criteria in tiers
+        (level, outcome, tuple(c.apply(patient) for c in criteria))
+        for level, outcome, criteria in tiers
     )
-    risk_results = tuple(r for _, results in tier_results for r in results)
+    risk_results = tuple(r for _, _, results in tier_results for r in results)
     all_results = (*inclusion_results, *exclusion_results, *risk_results)
 
     def result(
@@ -196,13 +204,13 @@ def decide(
     if reasons:
         return result(Outcome.NOT_APPLICABLE, exclusion_reasons=reasons)
 
-    # 2. A met risk criterion recommends CT, at the highest tier met, even if
-    #    applicability is not fully known: missing data could only make the
-    #    rule not apply (no guidance), never make CT unnecessary.
+    # 2. A met risk criterion gives its tier's outcome, at the highest tier met,
+    #    even if applicability is not fully known: missing data could only make
+    #    the rule not apply (no guidance), never make CT unnecessary.
     triggered = tuple(c for c in risk_results if c.status is CriterionStatus.MET)
-    for level, results in tier_results:
+    for level, outcome, results in tier_results:
         if _any_status(results, CriterionStatus.MET):
-            return result(Outcome.CT_RECOMMENDED, level, triggered)
+            return result(outcome, level, triggered)
 
     # 3. Nothing met, but something unknown: unknown is never negative.
     if _any_status(all_results, CriterionStatus.UNKNOWN):

@@ -25,7 +25,7 @@ def missing_value(name: str):
 DECISIVE_FIELDS = [
     name for name in CCHR_INPUTS if name not in REDUNDANT_WHEN_LOC_PRESENT
 ]
-NEW_ORLEANS_ONLY = [name for name in FIELDS if name not in CCHR_INPUTS]
+OTHER_RULES_ONLY = [name for name in FIELDS if name not in CCHR_INPUTS]
 
 
 @pytest.mark.parametrize("name", DECISIVE_FIELDS)
@@ -37,7 +37,7 @@ def test_missing_input_on_negative_patient_is_indeterminate(name):
     assert result.missing_inputs == (name,)
 
 
-@pytest.mark.parametrize("name", NEW_ORLEANS_ONLY)
+@pytest.mark.parametrize("name", OTHER_RULES_ONLY)
 def test_fields_the_rule_does_not_use_are_never_reported_missing(name):
     result = evaluate_cchr(negative_patient(**{name: missing_value(name)}))
 

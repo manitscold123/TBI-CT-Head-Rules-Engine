@@ -280,8 +280,8 @@ def evaluate_cchr(patient: Patient) -> RuleResult:
         INCLUSION_CRITERIA,
         EXCLUSION_CRITERIA,
         (
-            (RiskLevel.HIGH, HIGH_RISK_CRITERIA),
-            (RiskLevel.MEDIUM, MEDIUM_RISK_CRITERIA),
+            (RiskLevel.HIGH, Outcome.CT_RECOMMENDED, HIGH_RISK_CRITERIA),
+            (RiskLevel.MEDIUM, Outcome.CT_RECOMMENDED, MEDIUM_RISK_CRITERIA),
         ),
     )
 

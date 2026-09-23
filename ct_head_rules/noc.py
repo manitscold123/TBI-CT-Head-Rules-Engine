@@ -110,13 +110,16 @@ INCLUSION_CRITERIA = (
 
 FINDINGS = (
     # p101: "Headache was defined as any head pain, whether diffuse or local."
+    # A severe headache recorded for PECARN is head pain, so it meets this
+    # finding too; its absence never implies no headache.
     _Criterion(
         "noc.finding.headache",
         "Headache",
         "risk_factor",
         SOURCE_FINDINGS,
         ("headache",),
-        lambda p: _from_finding(p.headache),
+        lambda p: _present_implies(p.headache, p.severe_headache),
+        also_reads=("severe_headache",),
     ),
     # p101: "Vomiting was defined as any emesis after the traumatic event."
     _Criterion(
@@ -235,7 +238,13 @@ NOTE_COAGULOPATHY = (
 
 def evaluate_noc(patient: Patient) -> RuleResult:
     """Apply the New Orleans Criteria to one patient."""
-    result = decide("noc", patient, INCLUSION_CRITERIA, (), ((None, FINDINGS),))
+    result = decide(
+        "noc",
+        patient,
+        INCLUSION_CRITERIA,
+        (),
+        ((None, Outcome.CT_RECOMMENDED, FINDINGS),),
+    )
 
     notes = []
     if result.outcome is Outcome.NOT_APPLICABLE:

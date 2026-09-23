@@ -68,6 +68,13 @@ def test_finding_present_recommends_ct(field, criterion_id):
     assert result.missing_inputs == ()
 
 
+def test_pecarn_severe_headache_implies_headache():
+    # Every severe headache (Kuppermann) is "any head pain" (Haydel p101).
+    result = evaluate_noc(negative_patient(headache=UNKNOWN, severe_headache=PRESENT))
+    assert_recommended(result, "noc.finding.headache")
+    assert result.missing_inputs == ("headache",)
+
+
 def test_any_vomiting_recommends_ct():
     # Vomiting: "any emesis after the traumatic event" (p101). The Canadian
     # rule needs 2 or more episodes.

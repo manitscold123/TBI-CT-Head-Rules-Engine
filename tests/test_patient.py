@@ -31,4 +31,6 @@ def test_fields_must_be_passed_by_name():
 def test_every_field_documents_its_definition_and_source():
     for field in dataclasses.fields(Patient):
         help_text = field.metadata.get("help", "")
-        assert "Stiell" in help_text or "Haydel" in help_text, field.name
+        assert any(
+            paper in help_text for paper in ("Stiell", "Haydel", "Kuppermann")
+        ), field.name

@@ -5,13 +5,14 @@ import json
 from pathlib import Path
 
 import pytest
-from patients import PRESENT, negative_patient
+from patients import PRESENT, negative_child, negative_patient
 
 from ct_head_rules.cchr import CCHR_INPUTS
 from ct_head_rules.cli import DISCLAIMER, main
 from ct_head_rules.findings import Finding
 from ct_head_rules.noc import NOC_INPUTS
 from ct_head_rules.patient import Patient
+from ct_head_rules.pecarn import PECARN_INPUTS
 
 ALL_FIELDS = list(CCHR_INPUTS)  # the default rule in these tests is cchr
 
@@ -194,6 +195,7 @@ def test_unfilled_template_is_accepted_and_indeterminate(capsys, patient_file):
         ("cchr", "on_warfarin.json", "not_applicable"),
         ("noc", "minor_head_injury.json", "ct_not_required"),
         ("noc", "on_warfarin.json", "ct_recommended"),  # age over 60
+        ("pecarn", "child_vomited_once.json", "observation_or_ct"),
     ],
 )
 def test_readme_example_files_give_documented_outcome(capsys, rule, example, outcome):
@@ -289,3 +291,38 @@ def test_json_output_includes_disclaimer_and_full_audit(capsys):
     age = next(c for c in result["criteria"] if c["id"] == "cchr.high.age_65_or_over")
     assert age["status"] == "met"
     assert age["source"].endswith("Panel 1 (p1394)")
+
+
+# --- PECARN ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("age", "outcome"), [(1, "observation_or_ct"), (5, "ct_not_required")]
+)
+def test_pecarn_same_fall_differs_by_age(capsys, patient_file, age, outcome):
+    path = patient_file(as_json(negative_child(age, fall_height_m=1.2)))
+    result = run_json(capsys, "--json", path, rule="pecarn")
+
+    assert result["rule"] == "pecarn"
+    assert result["outcome"] == outcome
+
+
+def test_pecarn_text_output_names_observation_outcome(capsys, patient_file):
+    path = patient_file(as_json(negative_child(5, vomiting_episodes=1)))
+    code, out, _ = run(capsys, "--json", path, rule="pecarn")
+
+    assert code == 0
+    assert "PECARN (Kuppermann et al., Lancet 2009)" in out
+    assert "Outcome: Observation or CT, based on other clinical factors" in out
+
+
+def test_pecarn_template_lists_only_its_inputs(capsys):
+    _, out, _ = run(capsys, "--template", rule="pecarn")
+    assert list(json.loads(out)) == list(PECARN_INPUTS)
+
+
+def test_pecarn_help_shows_its_own_flags_and_definitions(capsys):
+    pecarn_help = help_text(capsys, "pecarn")
+
+    assert "--fall-height-m" in pecarn_help and "--headache" not in pecarn_help
+    assert "Kuppermann" in pecarn_help

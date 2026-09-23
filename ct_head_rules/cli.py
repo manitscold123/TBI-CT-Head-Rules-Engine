@@ -15,6 +15,7 @@ from ct_head_rules.cchr import CCHR_INPUTS, evaluate_cchr
 from ct_head_rules.findings import Finding
 from ct_head_rules.noc import NOC_INPUTS, evaluate_noc
 from ct_head_rules.patient import Patient
+from ct_head_rules.pecarn import PECARN_INPUTS, evaluate_pecarn
 from ct_head_rules.rules import CriterionResult, Outcome, RuleResult
 
 DISCLAIMER = "Educational use only. NOT for clinical use."
@@ -24,6 +25,7 @@ FINDING_VALUES = [finding.value for finding in Finding]
 
 OUTCOME_LABELS = {
     Outcome.CT_RECOMMENDED: "CT recommended",
+    Outcome.OBSERVATION_OR_CT: "Observation or CT, based on other clinical factors",
     Outcome.CT_NOT_REQUIRED: "CT not required by this rule",
     Outcome.NOT_APPLICABLE: "Rule not applicable to this patient",
     Outcome.INDETERMINATE: "Indeterminate: missing inputs prevent a conclusion",
@@ -45,6 +47,9 @@ RULES = {
         "New Orleans Criteria (Haydel et al., N Engl J Med 2000)",
         evaluate_noc,
         NOC_INPUTS,
+    ),
+    "pecarn": RuleSpec(
+        "PECARN (Kuppermann et al., Lancet 2009)", evaluate_pecarn, PECARN_INPUTS
     ),
 }
 

@@ -4,10 +4,13 @@
 > **Not for clinical use.** For teaching only. Not clinically validated or reviewed
 > by any regulator. Never use it to decide a patient's care.
 
-Evaluates two head CT decision rules, the **Canadian CT Head Rule** (`cchr`,
-Stiell et al., *Lancet* 2001) and the **New Orleans Criteria** (`noc`, Haydel et
-al., *N Engl J Med* 2000), and explains each result: which criteria were met,
-which inputs are missing, and where in the paper each criterion comes from.
+Evaluates three head CT decision rules and explains each result: which
+criteria were met, which inputs are missing, and where in the paper each
+criterion comes from.
+
+- **Canadian CT Head Rule** (`cchr`): Stiell et al., *Lancet* 2001. Adults.
+- **New Orleans Criteria** (`noc`): Haydel et al., *N Engl J Med* 2000.
+- **PECARN** (`pecarn`): Kuppermann et al., *Lancet* 2009. Children.
 
 ## Install
 
@@ -44,7 +47,7 @@ Missing inputs:
 - Yes/no findings take `present`, `absent` or `unknown`. Others take a number.
 - `--template` prints a JSON file with every finding unknown, ready to fill in.
 - `--format json` gives machine-readable output, including every criterion's status and source.
-- One JSON file works for both rules; each rule reads only the fields it needs.
+- One JSON file works for every rule; each rule reads only the fields it needs.
 - `--help` lists that rule's flags, each with the paper's definition.
 - Invalid input (such as a misspelt JSON field) is an error, with exit code 2.
 
@@ -55,6 +58,7 @@ Missing inputs:
 | CT recommended | New Orleans: any of the seven findings is present. |
 | CT recommended (high risk) | Canadian: any high-risk criterion is met. The authors called CT mandatory. |
 | CT recommended (medium risk) | Canadian: only medium-risk criteria are met. The authors suggest CT or careful observation. |
+| Observation or CT | PECARN: only middle-tier predictors are present. The authors leave the choice to other factors, such as worsening symptoms or parental preference. |
 | CT not required by this rule | The patient is eligible, every input is known, and nothing is met. |
 | Rule not applicable | The patient is outside the study population, e.g. GCS 14 for New Orleans, or on an anticoagulant for Canadian. The rule gives no guidance, which is **not** "CT not required". |
 | Indeterminate | Nothing is met, but missing inputs prevent a conclusion. |
@@ -62,22 +66,29 @@ Missing inputs:
 For example, [`examples/on_warfarin.json`](examples/on_warfarin.json) is "not
 applicable" for the Canadian rule even though the patient is 72, a high-risk age.
 New Orleans recommends CT (age over 60), with a note that its study could not
-evaluate anticoagulated patients.
+evaluate anticoagulated patients. For PECARN,
+[`examples/child_vomited_once.json`](examples/child_vomited_once.json) gives
+"observation or CT".
 
 ## How the rules differ
 
-| | Canadian (`cchr`) | New Orleans (`noc`) |
-|---|---|---|
-| **GCS** | **13–15** | **15 only** |
-| Age | 16+; 65+ is high risk | 3+; over 60 is a finding |
-| Vomiting | 2 or more episodes | Any |
-| Anticoagulants | Exclusion | Not an exclusion, but untested |
-| Tiers | High and medium risk | One |
+| | Canadian (`cchr`) | New Orleans (`noc`) | PECARN (`pecarn`) |
+|---|---|---|---|
+| **GCS** | **13–15** | **15 only** | **14–15** |
+| Age | 16+; 65+ is high risk | 3+; over 60 is a finding | Under 18, with separate rules for under 2 and 2+ |
+| Loss of consciousness | Required (or amnesia or disorientation) | Required (or amnesia for the event) | Not required |
+| Vomiting | 2 or more episodes | Any | Any, age 2+ |
+| Mechanism | "Dangerous": falls over 3 ft or 5 stairs, and more | Not used | "Severe": falls over 0.9 m (under 2) or 1.5 m (2+), and more |
+| Anticoagulants | Exclusion | Not an exclusion, but untested | Not mentioned (bleeding disorders are excluded) |
+| Outcomes | CT (high or medium risk) | CT | CT, or observation or CT |
 
 Where the papers define a similar finding differently, such as loss of
 consciousness or seizure, each gets its own field; `--help` shows each
-definition. The only link between the two: a Canadian skull fracture sign that
-is present also counts as New Orleans trauma above the clavicles.
+definition. A few findings carry over when present, never when absent: a
+Canadian skull fracture sign counts as New Orleans trauma above the clavicles; a
+Canadian ejection or pedestrian mechanism counts as PECARN severe mechanism;
+witnessed or reported loss of consciousness counts for PECARN; and a PECARN
+severe headache counts as a New Orleans headache.
 
 ## Interpretation choices
 
@@ -94,6 +105,9 @@ published) wins.
 | Criterion met, eligibility unknown | CT recommended, with the missing input flagged (both rules) |
 | New Orleans: GCS 14 from a memory deficit alone | Not re-scored automatically; a note says the paper scored this as 15 |
 | New Orleans: declined CT, or injuries ruling out CT | Study exclusions, not implemented |
+| PECARN: neuroimaging before transfer | Study exclusion, not implemented |
+| PECARN: age unknown | Indeterminate, since age picks the under-2 or 2+ rule |
+| PECARN: "pedestrian or bicyclist without helmet" | The helmet applies only to the cyclist |
 
 ## Development
 
@@ -116,6 +130,10 @@ CI runs both on every push, on Python 3.11–3.13. Project conventions are in
 - Haydel MJ, Preston CA, Mills TJ, et al. Indications for computed tomography in
   patients with minor head injury. *N Engl J Med* 2000;343:100–05. Eligibility
   and the seven findings: Methods (pp100–01).
+- Kuppermann N, Holmes JF, Dayan PS, et al. Identification of children at very
+  low risk of clinically-important brain injuries after head trauma: a
+  prospective cohort study. *Lancet* 2009;374:1160–70. Eligibility: Methods
+  (pp1161–62). Rules: Figure 3 (p1168).
 
 The PDFs are copyrighted and not included here;
 [`sources/README.md`](sources/README.md) lists them.

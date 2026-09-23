@@ -9,11 +9,42 @@ UNKNOWN = Finding.UNKNOWN
 
 
 def negative_patient(**overrides) -> Patient:
-    """Eligible for both rules, every input known, no criterion of either met.
+    """An adult eligible for the Canadian and New Orleans rules, every input
+    known, no criterion of either met.
 
     Override any field to build a specific scenario.
     """
-    fields = dict(
+    return Patient(**(_adult_fields() | overrides))
+
+
+def negative_child(age_years: int, **overrides) -> Patient:
+    """A child eligible for PECARN, every input for both age groups known, no
+    predictor met. Also carries the adult rules' negative fields, except that
+    there was no loss of consciousness, which PECARN does not require.
+    """
+    fields = _adult_fields() | dict(
+        age_years=age_years,
+        witnessed_loc=ABSENT,
+        other_altered_mental_status=ABSENT,
+        palpable_or_unclear_skull_fracture=ABSENT,
+        non_frontal_scalp_haematoma=ABSENT,
+        loc_duration_seconds=0,
+        not_acting_normally_per_parent=ABSENT,
+        history_of_loc=ABSENT,
+        severe_headache=ABSENT,
+        fall_height_m=0,
+        severe_non_fall_mechanism=ABSENT,
+        trivial_mechanism_no_symptoms=ABSENT,
+        penetrating_trauma=ABSENT,
+        brain_tumour=ABSENT,
+        neuro_disorder_complicating_assessment=ABSENT,
+        ventricular_shunt=ABSENT,
+    )
+    return Patient(**(fields | overrides))
+
+
+def _adult_fields() -> dict:
+    return dict(
         # shared
         age_years=30,
         witnessed_loc=PRESENT,
@@ -52,5 +83,3 @@ def negative_patient(**overrides) -> Patient:
         trauma_above_clavicles=ABSENT,
         post_traumatic_seizure=ABSENT,
     )
-    fields.update(overrides)
-    return Patient(**fields)
