@@ -197,3 +197,71 @@ def test_oversized_body_is_refused(server):
 def test_serve_command_takes_a_port():
     args = build_parser().parse_args(["serve", "--port", "8123"])
     assert args.rule == "serve" and args.port == 8123
+
+
+@pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity"])
+def test_non_finite_numbers_are_400(server, literal):
+    body = f'{{"age_years": 1, "fall_height_m": {literal}}}'
+    response, data = request(server, "POST", "/api/evaluate", body)
+    assert response.status == 400
+    assert "fall_height_m" in json.loads(data)["error"]
+
+
+# --- Fuzzing ------------------------------------------------------------------------
+
+ODD_VALUES = [None, True, False, 0, -1, 2.5, 10**30, "", "present", "y", "NaN",
+              "é", [], {}, [1], {"a": 1}, "15", 1e308]  # fmt: skip
+ODD_KEYS = ["", "__proto__", "age_years ", "AGE_YEARS", "é", "0"]
+ODD_BODIES = [b"", b"null", b"[]", b'"x"', b"{", b"\xff\xfe", b"{}" * 5,
+              b'{"age_years": 1e400}', b'{"age_years": -0.0}',
+              b'{"a": ' * 3000]  # fmt: skip
+
+
+def random_body(rng) -> bytes:
+    from ct_head_rules.api import ALL_INPUTS
+
+    body = {}
+    for _ in range(rng.randint(0, 6)):
+        key = rng.choice([*ALL_INPUTS, *ODD_KEYS]) if rng.random() < 0.9 else "x"
+        body[key] = rng.choice(ODD_VALUES)
+    return json.dumps(body).encode()
+
+
+def test_random_bodies_never_cause_a_server_error(server):
+    import random
+
+    rng = random.Random(20260923)
+    bodies = ODD_BODIES + [random_body(rng) for _ in range(300)]
+    for body in bodies:
+        response, data = request(server, "POST", "/api/evaluate", body)
+        assert response.status in (200, 400), (body[:80], response.status, data[:200])
+        json.loads(data)  # always a JSON reply
+
+
+@pytest.mark.parametrize("length", ["abc", "-5", "1.5", ""])
+def test_bad_content_length_is_400(server, length):
+    host, port = server.server_address[:2]
+    connection = http.client.HTTPConnection(host, port, timeout=5)
+    connection.putrequest("POST", "/api/evaluate")
+    connection.putheader("Content-Length", length)
+    connection.endheaders(b"{}")
+    response = connection.getresponse()
+    response.read()
+    connection.close()
+    assert response.status == 400 if length else response.status in (200, 400)
+
+
+def test_body_shorter_than_its_content_length_does_not_hold_the_server(server):
+    import socket
+
+    from ct_head_rules.web import Handler
+
+    assert Handler.timeout and Handler.timeout <= 30
+    host, port = server.server_address[:2]
+    with socket.create_connection((host, port), timeout=5) as sock:
+        sock.sendall(
+            b"POST /api/evaluate HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+            b"Content-Length: 100\r\n\r\n{}"
+        )
+        # Meanwhile the server still answers other requests.
+        assert request(server, "GET", "/api/fields")[0].status == 200

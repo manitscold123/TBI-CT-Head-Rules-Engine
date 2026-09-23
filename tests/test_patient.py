@@ -34,3 +34,14 @@ def test_every_field_documents_its_definition_and_source():
         assert any(
             paper in help_text for paper in ("Stiell", "Haydel", "Kuppermann")
         ), field.name
+
+
+NUMBER_FIELDS = [f.name for f in dataclasses.fields(Patient) if f.type is not Finding]
+
+
+@pytest.mark.parametrize("name", NUMBER_FIELDS)
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_numbers_are_rejected(name, value):
+    # NaN compares false with everything, so it would act as a negative.
+    with pytest.raises(ValueError, match=name):
+        Patient(**{name: value})

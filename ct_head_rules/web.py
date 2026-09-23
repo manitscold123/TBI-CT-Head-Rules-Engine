@@ -89,6 +89,9 @@ def _page() -> bytes:
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "ct-head-rules"
+    # Seconds a connection may sit idle, e.g. sending less than its
+    # Content-Length, before the server gives up on it.
+    timeout = 10
 
     def log_message(self, format, *args):  # keep the terminal quiet
         pass
@@ -131,7 +134,11 @@ class Handler(BaseHTTPRequestHandler):
         if url.path != "/api/evaluate":
             return self._error(HTTPStatus.NOT_FOUND, "not found")
 
-        length = int(self.headers.get("Content-Length") or 0)
+        length_header = self.headers.get("Content-Length", "0").strip() or "0"
+        if not length_header.isdigit():
+            self.close_connection = True
+            return self._error(HTTPStatus.BAD_REQUEST, "invalid Content-Length")
+        length = int(length_header)
         if length > MAX_BODY_BYTES:
             self.close_connection = True
             return self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "body too large")
@@ -139,6 +146,8 @@ class Handler(BaseHTTPRequestHandler):
             values = json.loads(self.rfile.read(length) or b"{}")
         except (json.JSONDecodeError, UnicodeDecodeError) as error:
             return self._error(HTTPStatus.BAD_REQUEST, f"not valid JSON: {error}")
+        except RecursionError:
+            return self._error(HTTPStatus.BAD_REQUEST, "JSON is nested too deeply")
         if not isinstance(values, dict):
             return self._error(HTTPStatus.BAD_REQUEST, "body must be a JSON object")
 

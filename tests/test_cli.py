@@ -452,3 +452,26 @@ def test_all_template_lists_every_field_and_round_trips(capsys, patient_file):
 
     result = run_json(capsys, "--json", patient_file(template), rule="all")
     assert all(r["outcome"] == "indeterminate" for r in result["results"].values())
+
+
+@pytest.mark.parametrize("value", ["nan", "inf"])
+def test_non_finite_flag_value_is_rejected(capsys, value):
+    code, _, err = run(capsys, "--fall-height-m", value, rule="pecarn")
+    assert code == 2
+    assert "fall_height_m" in err
+
+
+def test_json_nan_is_rejected(capsys, tmp_path):
+    path = tmp_path / "nan.json"
+    path.write_text('{"retrograde_amnesia_minutes": NaN}')
+    code, _, err = run(capsys, "--json", str(path))
+    assert code == 2
+    assert "retrograde_amnesia_minutes" in err
+
+
+def test_deeply_nested_json_file_is_an_input_error(capsys, tmp_path):
+    path = tmp_path / "deep.json"
+    path.write_text('{"a": ' * 5000)
+    code, _, err = run(capsys, "--json", str(path))
+    assert code == 2
+    assert "deep.json" in err

@@ -15,6 +15,7 @@ Sources:
 """
 
 import dataclasses
+import math
 from dataclasses import dataclass
 
 from ct_head_rules.findings import Finding
@@ -231,6 +232,10 @@ class Patient:
                     raise TypeError(
                         f"{field.name} must be a number or None, got {value!r}"
                     )
+                # NaN compares false with every threshold, so it would act as
+                # a negative finding; infinity is not a measurement.
+                if not math.isfinite(value):
+                    raise ValueError(f"{field.name} must be finite, got {value}")
                 if value < 0:
                     raise ValueError(f"{field.name} must not be negative, got {value}")
 

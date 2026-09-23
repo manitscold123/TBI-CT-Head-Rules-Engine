@@ -262,3 +262,12 @@ def test_ask_starts_from_a_json_file(capsys, typed, tmp_path):
 
     assert main(["ask", "--json", str(start), "--rules", "cchr"]) == 0
     assert "Oral anticoagulant use" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("answer", ["nan", "inf"])
+def test_non_finite_answer_is_asked_again(answer):
+    script = Script({"age_years": "1", "fall_height_m": [answer, "0"]})
+    values = run(script, rules=("pecarn",))
+
+    assert script.asked.count("fall_height_m") == 2
+    assert values["fall_height_m"] == 0

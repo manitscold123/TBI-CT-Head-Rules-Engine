@@ -87,6 +87,8 @@ def load_json(path: Path) -> dict:
         raise InputError(f"cannot read {path}: {error.strerror}") from error
     except json.JSONDecodeError as error:
         raise InputError(f"{path} is not valid JSON: {error}") from error
+    except RecursionError:
+        raise InputError(f"{path} is nested too deeply to be patient data") from None
     if not isinstance(data, dict):
         raise InputError(f"{path} must contain a JSON object")
     check_field_names(data, where=str(path))
