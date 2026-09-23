@@ -297,3 +297,24 @@ def test_cross_site_simple_post_is_refused(server):
         server, "POST", "/api/evaluate", b"{}", {"Content-Type": "text/plain"}
     )
     assert response.status == 415
+
+
+# --- Question tree --------------------------------------------------------------
+
+
+def test_fields_include_the_question_tree(server):
+    from ct_head_rules.questions import GATES, ROOTS
+
+    body = json.loads(request(server, "GET", "/api/fields")[1])
+
+    assert body["roots"] == list(ROOTS)
+    gates = {g["id"]: g for g in body["gates"]}
+    assert set(gates) == set(GATES)
+    fall = gates["gate.fall"]
+    assert fall["label"] == "Fall"
+    assert fall["text"] == GATES["gate.fall"].text
+    assert fall["children"] == list(GATES["gate.fall"].children)
+    assert "Stiell" in fall["source"]
+    by_name = {f["name"]: f for f in body["fields"]}
+    assert by_name["battle_sign"]["parent"] == "gate.basal_skull_fracture"
+    assert by_name["age_years"]["parent"] is None

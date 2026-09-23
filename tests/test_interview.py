@@ -4,7 +4,13 @@ import builtins
 import json
 
 import pytest
-from patients import PRESENT, UNKNOWN, negative_child, negative_patient
+from patients import (
+    PRESENT,
+    UNKNOWN,
+    answers_through_tree,
+    negative_child,
+    negative_patient,
+)
 
 from ct_head_rules.api import evaluate_all, parse_values, patient_to_values
 from ct_head_rules.cchr import CCHR_INPUTS
@@ -13,6 +19,7 @@ from ct_head_rules.interview import interview, is_settled, next_question
 from ct_head_rules.noc import NOC_INPUTS
 from ct_head_rules.patient import Patient
 from ct_head_rules.pecarn import PECARN_INPUTS, evaluate_pecarn
+from ct_head_rules.questions import GATES
 from ct_head_rules.rules import Outcome, RiskLevel
 
 PECARN_ONLY = set(PECARN_INPUTS) - set(CCHR_INPUTS) - set(NOC_INPUTS)
@@ -82,7 +89,8 @@ def test_rule_that_stops_applying_stops_asking_its_inputs():
     run(script)
 
     assert script.asked[0] == "age_years"
-    assert not PECARN_ONLY & set(script.asked)
+    # PECARN's LOC and mechanism fields double as broad questions for adults.
+    assert not (PECARN_ONLY - set(GATES)) & set(script.asked)
 
 
 def test_each_question_is_asked_once():
@@ -277,3 +285,94 @@ def test_huge_number_answer_is_asked_again():
     script = Script({"age_years": "30", "vomiting_episodes": ["1" + "0" * 400, "0"]})
     values = run(script, rules=("noc",))
     assert values["vomiting_episodes"] == 0
+
+
+# --- Broad questions first ---------------------------------------------------------
+
+
+def test_adult_without_loc_amnesia_or_disorientation_needs_three_questions():
+    script = Script(
+        {
+            "age_years": "30",
+            "blunt_head_trauma": "y",
+            "gate.loc_amnesia_disorientation": "n",
+        }
+    )
+    values = run(script)
+
+    assert script.asked == [
+        "age_years",
+        "blunt_head_trauma",
+        "gate.loc_amnesia_disorientation",
+    ]
+    results = evaluate_all(parse_values(values))
+    assert {r.outcome for r in results.values()} == {Outcome.NOT_APPLICABLE}
+
+
+def test_no_to_a_broad_question_skips_its_details():
+    script = Script(answers_through_tree(negative_patient()))
+    run(script)
+
+    assert "trauma_above_clavicles" in script.asked
+    for detail in ("battle_sign", "haemotympanum", "severe_headache"):
+        assert detail not in script.asked
+
+
+def test_yes_to_a_broad_question_asks_its_details():
+    answers = answers_through_tree(negative_patient(battle_sign=PRESENT))
+    script = Script(answers)
+    values = run(script, rules=("cchr",))
+
+    assert script.asked.index("trauma_above_clavicles") < script.asked.index(
+        "gate.basal_skull_fracture"
+    )
+    assert evaluate_all(parse_values(values), ("cchr",))["cchr"].outcome is (
+        Outcome.CT_RECOMMENDED
+    )
+
+
+def test_broad_question_prompt_shows_its_wording():
+    prompts = []
+    interview(
+        {"age_years": 30, "blunt_head_trauma": "present"},
+        ("cchr",),
+        lambda name, prompt: prompts.append(prompt) or "q",
+        lambda _: None,
+    )
+    assert prompts[0].lstrip().startswith("gate.loc_amnesia_disorientation:")
+    assert "Any loss of consciousness, any amnesia" in prompts[0]
+    assert "[y/n/u" in prompts[0]
+
+
+def questions_asked(patient, monkeypatch, flat=False) -> list[str]:
+    """The questions a truthful user answers, with or without the tree."""
+    if flat:
+        monkeypatch.setattr(
+            "ct_head_rules.interview.next_prompt", lambda field, *_: field
+        )
+    script = Script(answers_through_tree(patient))
+    values = run(script)
+    monkeypatch.undo()
+    # Either way, the answers give the same results as the whole patient.
+    for name, result in evaluate_all(parse_values(values)).items():
+        assert result.outcome is evaluate_all(patient)[name].outcome, name
+    return script.asked
+
+
+LOC = {"witnessed_loc": PRESENT, "history_of_loc": PRESENT, "loc_duration_seconds": 10}
+
+
+@pytest.mark.parametrize(
+    "patient",
+    [
+        negative_child(30, **LOC),  # adult, every other finding negative
+        negative_child(16, **LOC),  # all three rules apply
+        negative_child(5),
+        negative_child(1),
+    ],
+    ids=["adult", "age 16", "age 5", "age 1"],
+)
+def test_the_tree_asks_fewer_questions_for_negative_patients(patient, monkeypatch):
+    flat = questions_asked(patient, monkeypatch, flat=True)
+    tree = questions_asked(patient, monkeypatch)
+    assert len(tree) < len(flat), (tree, flat)

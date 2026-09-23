@@ -80,7 +80,10 @@ ct-head-rules ask --save answers.json
 
 `ask` puts one question at a time, each with the paper's definition. It asks
 first whether each rule applies, skips rules that don't, and stops once no
-answer could change any result. Press Enter for unknown, or `q` to finish.
+answer could change any result. Broad questions come first (such as "any
+injury above the collarbones?"): "No" answers every detail below it, so those
+are never asked, and "Yes" leads to the details. Each broad question names
+everything it rules out, checked against the papers (`ct_head_rules/questions.py`). Press Enter for unknown, or `q` to finish.
 `--save` writes the answers in the `--json` format; `--json FILE` starts from
 earlier answers.
 
@@ -90,8 +93,9 @@ earlier answers.
 ct-head-rules serve        # then open http://127.0.0.1:8000
 ```
 
-One page shows the three rules side by side and updates as you answer. Inputs
-that could still change a result are highlighted, and "Only what's still
+One page shows the three rules side by side and updates as you answer. It uses
+the same broad questions as `ask`, with details hidden until you answer "Yes"
+or "Not sure". Inputs that could still change a result are highlighted, and "Only what's still
 needed" hides the rest. Import and Export use the same JSON as `--json`. It
 runs on your machine only, with no external scripts, and listens on 127.0.0.1.
 

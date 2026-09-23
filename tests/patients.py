@@ -83,3 +83,30 @@ def _adult_fields() -> dict:
         trauma_above_clavicles=ABSENT,
         post_traumatic_seizure=ABSENT,
     )
+
+
+def answers_through_tree(patient: Patient) -> dict[str, str]:
+    """What a truthful user would type for every field and broad question."""
+    from ct_head_rules.api import patient_to_values
+    from ct_head_rules.questions import GATES, descendant_fields
+
+    values = patient_to_values(patient)
+    answers = {k: "" if v is None else str(v) for k, v in values.items()}
+
+    def positive(name: str) -> bool:
+        value = values[name]
+        return value == "present" or (isinstance(value, int | float) and value > 0)
+
+    def negative(name: str) -> bool:
+        return values[name] in ("absent", 0)
+
+    for gate_id in GATES:
+        below = descendant_fields(gate_id)
+        own = (gate_id,) if gate_id in values else ()
+        if any(positive(n) for n in (*own, *below)):
+            answers[gate_id] = "y"
+        elif all(negative(n) for n in (*own, *below)):
+            answers[gate_id] = "n"
+        else:
+            answers[gate_id] = own and answers[gate_id] or ""
+    return answers

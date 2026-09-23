@@ -256,3 +256,38 @@ def test_different_seeds_also_hold(seed):
         for result in evaluate_all(patient).values():
             if result.outcome is Outcome.CT_NOT_REQUIRED:
                 assert every_criterion_decided(result)
+
+
+# --- 8: answering through the question tree changes no result -----------------------
+
+
+def consistent(patient: Patient) -> Patient:
+    """A broad finding is present whenever something below it is present."""
+    from ct_head_rules.questions import GATES, descendant_fields
+
+    fixes = {}
+    for gate_id in GATES:
+        if gate_id in FIELDS and any(
+            getattr(patient, n) is Finding.PRESENT
+            or (FIELDS[n].type is not Finding and (getattr(patient, n) or 0) > 0)
+            for n in descendant_fields(gate_id)
+        ):
+            fixes[gate_id] = Finding.PRESENT
+    return dataclasses.replace(patient, **fixes)
+
+
+def test_truthful_answers_through_the_tree_give_the_same_results():
+    from patients import answers_through_tree
+
+    for case, rng, patient in patients(count=CASES // 3):
+        patient = consistent(complete(patient, rng))
+        answers = answers_through_tree(patient)
+        values = interview(
+            {}, tuple(RULES), lambda name, _, a=answers: a.get(name, ""), lambda _: None
+        )
+        got = evaluate_all(parse_values(values))
+        for name, expected in evaluate_all(patient).items():
+            assert (got[name].outcome, got[name].risk_level) == (
+                expected.outcome,
+                expected.risk_level,
+            ), f"{name}; " + where(case, patient)

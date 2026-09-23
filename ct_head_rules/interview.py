@@ -16,6 +16,7 @@ from ct_head_rules.api import (
     parse_values,
 )
 from ct_head_rules.findings import Finding
+from ct_head_rules.questions import GATES, answer_gate, next_prompt, question_text
 from ct_head_rules.rules import (
     CriterionResult,
     CriterionStatus,
@@ -89,8 +90,7 @@ _FINISH = object()
 
 
 def _parse_answer(name: str, text: str):
-    field = FIELDS[name]
-    if field.type is Finding:
+    if name not in FIELDS or FIELDS[name].type is Finding:  # a finding or gate
         if not text:
             return Finding.UNKNOWN.value
         try:
@@ -99,7 +99,7 @@ def _parse_answer(name: str, text: str):
             raise InputError(f"{name} {error}") from None
     if not text:
         return None
-    whole = field.type == int | None
+    whole = FIELDS[name].type == int | None
     try:
         return int(text) if whole else float(text)
     except ValueError:
@@ -108,12 +108,21 @@ def _parse_answer(name: str, text: str):
 
 
 def _prompt(name: str) -> str:
-    field = FIELDS[name]
-    hint = "y/n/u" if field.type is Finding else "number"
+    finding = name in GATES or FIELDS[name].type is Finding
+    hint = "y/n/u" if finding else "number"
     return (
-        f"\n{name}: {field.metadata['help']}\n"
-        f"  [{hint}; Enter if unknown; q to finish] > "
+        f"\n{name}: {question_text(name)}\n  [{hint}; Enter if unknown; q to finish] > "
     )
+
+
+def _apply(name: str, answer, values: dict) -> dict:
+    """The answers after this one; a broad question may fill in its details."""
+    if name in GATES:
+        updated = answer_gate(values, name, Finding(answer))
+    else:
+        updated = values | {name: answer}
+    parse_values(updated)  # range checks, e.g. GCS 3-15
+    return updated
 
 
 def _ask_one(name: str, values: dict, ask, say):
@@ -125,9 +134,7 @@ def _ask_one(name: str, values: dict, ask, say):
         if text.lower() == "q":
             return _FINISH
         try:
-            value = _parse_answer(name, text)
-            parse_values(values | {name: value})  # range checks, e.g. GCS 3-15
-            return value
+            return _apply(name, _parse_answer(name, text), values)
         except InputError as error:
             say(f"  {error}. Try again.")
 
@@ -140,9 +147,10 @@ def interview(
 ) -> dict:
     """Ask questions until every rule is settled, or the user finishes.
 
-    `ask(name, prompt)` returns the typed answer (EOFError finishes);
-    `values` holds answers already known, in JSON form, and is returned
-    with the new answers added.
+    Broad questions come first (see questions.py): "No" answers every detail
+    below it, so those details are never asked. `ask(name, prompt)` returns
+    the typed answer (EOFError finishes); `values` holds answers already
+    known, in JSON form, and is returned with the new answers added.
     """
     rules = tuple(rules)
     say(DISCLAIMER)
@@ -150,11 +158,12 @@ def interview(
     asked: set[str] = set()
     while True:
         results = evaluate_all(parse_values(values), rules)
-        name = next_question(results, asked)
-        if name is None:
+        field = next_question(results, asked)
+        if field is None:
             return values
+        name = next_prompt(field, asked, values, set(needed_inputs(results)))
         asked.add(name)
-        answer = _ask_one(name, values, ask, say)
-        if answer is _FINISH:
+        updated = _ask_one(name, values, ask, say)
+        if updated is _FINISH:
             return values
-        values = values | {name: answer}
+        values = updated

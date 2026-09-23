@@ -79,6 +79,9 @@
   .field.needed { border-left-color: var(--needed); }
   .field.is-next { box-shadow: 0 0 0 2px var(--accent); }
   .field.hidden { display: none; }
+  .children { margin: 0 0 6px 14px; padding-left: 10px; border-left: 2px solid var(--border); }
+  .children.closed { display: none; }
+  .field.gate .name::after { content: " \2014 broad question"; font-weight: 400; color: var(--muted); font-size: .8rem; }
   .field .name { font-weight: 600; }
   .field .help { grid-column: 1 / -1; color: var(--muted); font-size: .85rem; }
   .badge {
@@ -160,7 +163,10 @@
 "use strict";
 const SHORT = { cchr: "Canadian", noc: "New Orleans", pecarn: "PECARN" };
 const WORDS = { loc: "LOC", gcs: "GCS", ed: "ED", csf: "CSF", "2h": "2 h", gt: ">", m: "(m)" };
-const state = { fields: [], rules: {}, values: {}, active: new Set(), needed: {}, next: null };
+const state = {
+  fields: [], byName: {}, gates: {}, roots: [], parent: {}, rules: {}, values: {},
+  gateAnswer: {}, derived: {}, active: new Set(), needed: {}, next: null,
+};
 let pending = 0, timer = null;
 
 const $ = (id) => document.getElementById(id);
@@ -186,17 +192,60 @@ function blankValues() {
   return Object.fromEntries(state.fields.map((f) => [f.name, f.type === "finding" ? "unknown" : null]));
 }
 
-function findingControl(field) {
+// --- The question tree: broad questions first ----------------------------------
+// "No" to a broad question answers every detail below it as absent (or 0);
+// "Yes" or "Not sure" shows the details. The rules are unchanged: the server
+// only ever sees Patient fields.
+
+const isGate = (id) => id in state.gates;
+const isField = (id) => id in state.byName;
+const positive = (v) => v === "present" || (typeof v === "number" && v > 0);
+const negative = (v) => v === "absent" || v === 0;
+const answered = (name) => state.values[name] !== null && state.values[name] !== "unknown";
+
+function descendants(gateId) {
+  const out = [];
+  for (const child of state.gates[gateId].children) {
+    if (isField(child)) out.push(child);
+    if (isGate(child)) out.push(...descendants(child));
+  }
+  return out;
+}
+function childGates(gateId) {
+  return state.gates[gateId].children.filter(isGate)
+    .flatMap((g) => [g, ...childGates(g)]);
+}
+function ancestors(id) {
+  const chain = [];
+  while (state.parent[id]) { id = state.parent[id]; chain.unshift(id); }
+  return chain;
+}
+function gateState(id) {
+  const names = [...(isField(id) ? [id] : []), ...descendants(id)];
+  if (names.some((n) => positive(state.values[n]))) return "yes";
+  if (names.every((n) => negative(state.values[n]))) return "no";
+  return null;
+}
+function isOpen(id) {
+  const answer = state.gateAnswer[id];
+  if (answer === "absent") return false;
+  if (answer === "present" || answer === "unknown") return true;
+  return gateState(id) === "yes" || descendants(id).some(answered);
+}
+
+function findingControl(name, options, onChange, title) {
   const group = el("div", { className: "seg", role: "radiogroup" });
-  group.setAttribute("aria-label", label(field.name));
-  for (const [value, text] of [["present", "Yes"], ["absent", "No"], ["unknown", "Unknown"]]) {
-    const id = `${field.name}-${value}`;
-    const input = el("input", { type: "radio", name: field.name, id, value });
-    input.addEventListener("change", () => update(field.name, value));
+  group.setAttribute("aria-label", title);
+  for (const [value, text] of options) {
+    const id = `${name}-${value}`;
+    const input = el("input", { type: "radio", name, id, value });
+    input.addEventListener("change", () => onChange(value));
     group.append(input, el("label", { htmlFor: id, textContent: text }));
   }
   return group;
 }
+const FIELD_OPTIONS = [["present", "Yes"], ["absent", "No"], ["unknown", "Unknown"]];
+const GATE_OPTIONS = [["present", "Yes"], ["absent", "No"], ["unknown", "Not sure"]];
 
 function numberControl(field) {
   const input = el("input", {
@@ -212,32 +261,69 @@ function numberControl(field) {
   return input;
 }
 
-function buildForm() {
-  const groups = new Map();
-  const ordered = [...state.fields].sort((a, b) => b.rules.length - a.rules.length);
-  for (const field of ordered) {
-    const key = field.rules.length === 3 ? "All three rules"
-      : field.rules.map((r) => SHORT[r]).join(" + ") + (field.rules.length === 1 ? " only" : "");
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(field);
+function answerGate(id, value) {
+  if (value === "absent") {
+    const clash = descendants(id).filter((n) => positive(state.values[n]));
+    if (clash.length) {
+      $("error").textContent = `"No" contradicts ${clash.map(label).join(", ")}, already answered Yes.`;
+      $("error").classList.add("show");
+      syncControls();
+      return;
+    }
+    state.derived[id] = { fields: [], gates: [] };
+    for (const name of descendants(id)) {
+      if (answered(name)) continue;
+      state.values[name] = state.byName[name].type === "finding" ? "absent" : 0;
+      state.derived[id].fields.push(name);
+    }
+    for (const gate of childGates(id)) {
+      if (state.gateAnswer[gate] == null) {
+        state.gateAnswer[gate] = "absent";
+        state.derived[id].gates.push(gate);
+      }
+    }
+  } else if (state.derived[id]) {  // undo exactly what "No" filled in
+    for (const name of state.derived[id].fields) state.values[name] = blankValues()[name];
+    for (const gate of state.derived[id].gates) state.gateAnswer[gate] = null;
+    delete state.derived[id];
   }
+  state.gateAnswer[id] = value;
+  if (isField(id)) state.values[id] = value;
+  syncControls();
+  renderFields();
+  schedule();
+}
+
+function node(id) {
+  const gate = isGate(id);
+  const field = state.byName[id];
+  const title = gate ? (state.gates[id].label || label(id)) : label(id);
+  const control = gate ? findingControl(id, GATE_OPTIONS, (v) => answerGate(id, v), title)
+    : field.type === "finding" ? findingControl(id, FIELD_OPTIONS, (v) => update(id, v), title)
+    : numberControl(field);
+  const help = gate ? state.gates[id].text : field.help;
+  const row = el("div", { className: gate ? "field gate" : "field", id: `f-${id}` },
+    el("div", {}, el("span", { className: "name", textContent: title }), el("span", { className: "badges" })),
+    control, el("div", { className: "help", textContent: help }));
+  if (!gate) return [row];
+  const box = el("div", { className: "children", id: `c-${id}` });
+  for (const child of state.gates[id].children) box.append(...node(child));
+  return [row, box];
+}
+
+function buildForm() {
   const form = $("form");
   form.replaceChildren();
-  for (const [title, fields] of groups) {
-    const section = el("section", { className: "group" }, el("h2", { textContent: title }));
-    for (const field of fields) {
-      const control = field.type === "finding" ? findingControl(field) : numberControl(field);
-      const name = el("div", {}, el("span", { className: "name", textContent: label(field.name) }),
-        el("span", { className: "badges" }));
-      section.append(el("div", { className: "field", id: `f-${field.name}` },
-        name, control, el("div", { className: "help", textContent: field.help })));
-    }
-    form.append(section);
-  }
+  for (const root of state.roots) form.append(...node(root));
 }
 
 function syncControls() {
+  for (const gate of Object.keys(state.gates)) {
+    const answer = state.gateAnswer[gate] ?? (isField(gate) && answered(gate) ? state.values[gate] : null);
+    for (const radio of document.getElementsByName(gate)) radio.checked = radio.value === answer;
+  }
   for (const field of state.fields) {
+    if (isGate(field.name)) continue;
     const value = state.values[field.name];
     if (field.type === "finding") {
       const radio = document.getElementById(`${field.name}-${value}`);
@@ -336,32 +422,51 @@ function render(body) {
   renderFields();
 }
 
+// Where a needed input shows up: itself, or the broad question hiding it.
+function target(name) {
+  return ancestors(name).find((gate) => !isOpen(gate)) ?? name;
+}
+
 function renderFields() {
   const onlyNeeded = $("only-needed").checked;
-  for (const field of state.fields) {
-    const row = $(`f-${field.name}`);
-    const rules = state.needed[field.name] || [];
-    const answered = state.values[field.name] !== null && state.values[field.name] !== "unknown";
+  const rulesAt = {};
+  for (const [name, rules] of Object.entries(state.needed)) {
+    const at = target(name);
+    rulesAt[at] = [...new Set([...(rulesAt[at] || []), ...rules])];
+  }
+  // With the filter on, show what is needed or answered, and the broad
+  // questions above those rows.
+  const keep = new Set();
+  for (const id of [...Object.keys(state.byName), ...Object.keys(state.gates)]) {
+    const answeredHere = isGate(id) ? state.gateAnswer[id] != null : answered(id);
+    if (rulesAt[id] || answeredHere) [id, ...ancestors(id)].forEach((x) => keep.add(x));
+  }
+  const next = state.next ? target(state.next) : null;
+  for (const id of [...Object.keys(state.byName), ...Object.keys(state.gates)]) {
+    const row = $(`f-${id}`);
+    const rules = rulesAt[id] || [];
     row.classList.toggle("needed", rules.length > 0);
-    row.classList.toggle("is-next", field.name === state.next);
-    row.classList.toggle("hidden", onlyNeeded && !rules.length && !answered);
+    row.classList.toggle("is-next", id === next);
+    row.classList.toggle("hidden", onlyNeeded && !keep.has(id));
     row.querySelector(".badges").replaceChildren(
       ...rules.map((r) => el("span", { className: "badge", textContent: SHORT[r] })));
+    if (isGate(id)) $(`c-${id}`).classList.toggle("closed", !isOpen(id));
   }
-  const next = $("next");
-  next.replaceChildren();
+  const banner = $("next");
+  banner.replaceChildren();
   const count = Object.keys(state.needed).length;
-  if (state.next) {
+  if (next) {
+    const nextTitle = isGate(next) ? (state.gates[next].label || label(next)) : label(next);
     const go = el("button", { type: "button", className: "primary", textContent: "Go to next question" });
     go.addEventListener("click", () => {
-      const row = $(`f-${state.next}`);
+      const row = $(`f-${next}`);
       row.scrollIntoView({ behavior: "smooth", block: "center" });
       row.querySelector("input")?.focus({ preventScroll: true });
     });
-    next.append(el("span", { textContent:
-      `${count} input${count === 1 ? "" : "s"} could still change a result. Next: ${label(state.next)}.` }), go);
+    banner.append(el("span", { textContent:
+      `${count} input${count === 1 ? "" : "s"} could still change a result. Next: ${nextTitle}.` }), go);
   } else {
-    next.append(el("span", { textContent: "No remaining input could change any selected rule's result." }));
+    banner.append(el("span", { textContent: "No remaining input could change any selected rule's result." }));
   }
 }
 
@@ -384,10 +489,20 @@ async function importJson(file) {
       if (field.type === "finding") state.values[name] = value == null ? "unknown" : String(value).trim().toLowerCase();
     }
     normaliseFindings();
+    deriveGateAnswers();
     syncControls();
     evaluate();
   } catch (error) {
     showError(`Could not import ${file.name}: ${error.message}`);
+  }
+}
+
+function deriveGateAnswers() {
+  state.derived = {};
+  for (const gate of Object.keys(state.gates)) {
+    const st = gateState(gate);
+    state.gateAnswer[gate] = st === "yes" ? "present" : st === "no" ? "absent"
+      : isField(gate) && answered(gate) ? state.values[gate] : null;
   }
 }
 
@@ -404,6 +519,13 @@ async function start() {
   const body = await (await fetch("/api/fields")).json();
   $("disclaimer").textContent = body.disclaimer;
   state.fields = body.fields;
+  state.byName = Object.fromEntries(body.fields.map((f) => [f.name, f]));
+  state.gates = Object.fromEntries(body.gates.map((g) => [g.id, g]));
+  state.roots = body.roots;
+  state.parent = {};
+  for (const g of body.gates) for (const child of g.children) state.parent[child] = g.id;
+  state.gateAnswer = {};
+  state.derived = {};
   state.rules = body.rules;
   state.active = new Set(Object.keys(body.rules));
   state.values = blankValues();
@@ -420,6 +542,8 @@ async function start() {
   });
   $("reset").addEventListener("click", () => {
     state.values = blankValues();
+    state.gateAnswer = {};
+    state.derived = {};
     syncControls();
     evaluate();
   });

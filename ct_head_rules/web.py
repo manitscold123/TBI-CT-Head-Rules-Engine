@@ -31,6 +31,7 @@ from ct_head_rules.api import (
 )
 from ct_head_rules.findings import Finding
 from ct_head_rules.interview import needed_inputs, next_question
+from ct_head_rules.questions import GATES, PARENT, ROOTS
 
 HOST = "127.0.0.1"
 ALLOWED_HOSTNAMES = {"127.0.0.1", "localhost"}
@@ -57,9 +58,21 @@ def fields_payload() -> dict:
                 "type": _field_type(name),
                 "help": FIELDS[name].metadata["help"],
                 "rules": [rule for rule, spec in RULES.items() if name in spec.inputs],
+                "parent": PARENT.get(name),
             }
             for name in ALL_INPUTS
         ],
+        "gates": [
+            {
+                "id": gate.id,
+                "label": gate.label,
+                "text": gate.text,
+                "children": list(gate.children),
+                "source": gate.source,
+            }
+            for gate in GATES.values()
+        ],
+        "roots": list(ROOTS),
     }
 
 
