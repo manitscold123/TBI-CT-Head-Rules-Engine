@@ -7,3 +7,4 @@ __pycache__/
 
 # Copyrighted papers: keep local copies, do not redistribute (see sources/README.md)
 sources/*.pdf
+build/
