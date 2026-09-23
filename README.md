@@ -44,12 +44,33 @@ Missing inputs:
 
 - **Anything you don't supply is unknown, never absent.**
 - Give findings as flags, a JSON file (`--json FILE`), or both. Flags override the file.
-- Yes/no findings take `present`, `absent` or `unknown`. Others take a number.
+- Yes/no findings take `present`, `absent` or `unknown` (or `y`, `n`, `u`). Others take a number.
 - `--template` prints a JSON file with every finding unknown, ready to fill in.
 - `--format json` gives machine-readable output, including every criterion's status and source.
 - One JSON file works for every rule; each rule reads only the fields it needs.
 - `--help` lists that rule's flags, each with the paper's definition.
 - Invalid input (such as a misspelt JSON field) is an error, with exit code 2.
+
+### Compare every rule
+
+```bash
+ct-head-rules all --json examples/on_warfarin.json
+```
+
+```text
+Educational use only. NOT for clinical use.
+
+cchr    Rule not applicable to this patient
+        Oral anticoagulant use
+noc     CT recommended
+        Age over 60
+pecarn  Rule not applicable to this patient
+        Not met: Age under 18
+```
+
+`all` takes every rule's flags, plus `--rules cchr,noc` to run a subset and
+`--detail` for each rule's full report. Missing inputs are merged into one list
+that names the rules needing each input.
 
 ## Outcomes
 

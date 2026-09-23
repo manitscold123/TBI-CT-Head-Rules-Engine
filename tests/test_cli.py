@@ -79,9 +79,37 @@ def test_finding_flag_takes_present_absent_or_unknown(capsys):
     assert result["exclusion_reasons"] == ["cchr.exclusion.oral_anticoagulant"]
 
 
+@pytest.mark.parametrize(
+    ("value", "finding"),
+    [
+        ("yes", "present"),
+        ("y", "present"),
+        ("Y", "present"),
+        ("no", "absent"),
+        ("n", "absent"),
+        ("u", "unknown"),
+        ("?", "unknown"),
+    ],
+)
+def test_finding_flag_takes_short_answers(capsys, value, finding):
+    result = run_json(capsys, "--battle-sign", value)
+    by_id = {c["id"]: c for c in result["criteria"]}
+    basal = by_id["cchr.high.basal_skull_fracture_sign"]
+    assert ("battle_sign" in basal["missing_inputs"]) is (finding == "unknown")
+    if finding == "present":
+        assert basal["status"] == "met"
+
+
+def test_json_finding_takes_short_answers(capsys, patient_file):
+    data = as_json(negative_patient()) | {"battle_sign": "y"}
+    assert run_json(capsys, "--json", patient_file(data))["triggered"] == [
+        "cchr.high.basal_skull_fracture_sign"
+    ]
+
+
 def test_invalid_finding_flag_value_is_rejected(capsys):
     with pytest.raises(SystemExit) as exit_info:
-        main(["cchr", "--battle-sign", "yes"])
+        main(["cchr", "--battle-sign", "maybe"])
     assert exit_info.value.code == 2
 
 
@@ -141,7 +169,7 @@ def test_misspelt_json_field_is_rejected(capsys, patient_file):
     assert "batle_sign" in err
 
 
-@pytest.mark.parametrize("value", [True, False, "yes", 1])
+@pytest.mark.parametrize("value", [True, False, 1, "maybe"])
 def test_json_finding_must_be_present_absent_or_unknown(capsys, patient_file, value):
     data = as_json(negative_patient()) | {"battle_sign": value}
     code, _, err = run(capsys, "--json", patient_file(data))
@@ -326,3 +354,93 @@ def test_pecarn_help_shows_its_own_flags_and_definitions(capsys):
 
     assert "--fall-height-m" in pecarn_help and "--headache" not in pecarn_help
     assert "Kuppermann" in pecarn_help
+
+
+# --- All rules at once ---------------------------------------------------------
+
+EXAMPLES = Path(__file__).parent.parent / "examples"
+
+
+def test_all_runs_every_rule_on_the_warfarin_example(capsys):
+    result = run_json(capsys, "--json", str(EXAMPLES / "on_warfarin.json"), rule="all")
+
+    assert result["disclaimer"] == DISCLAIMER
+    assert {name: r["outcome"] for name, r in result["results"].items()} == {
+        "cchr": "not_applicable",
+        "noc": "ct_recommended",
+        "pecarn": "not_applicable",
+    }
+
+
+def test_all_text_output_gives_one_line_per_rule_with_reason(capsys):
+    code, out, _ = run(capsys, "--json", str(EXAMPLES / "on_warfarin.json"), rule="all")
+
+    assert code == 0
+    assert DISCLAIMER in out
+    lines = out.splitlines()
+    cchr = lines.index(next(line for line in lines if line.startswith("cchr")))
+    assert "Rule not applicable" in lines[cchr]
+    assert "Oral anticoagulant use" in lines[cchr + 1]
+    assert any(line.startswith("noc") and "CT recommended" in line for line in lines)
+    assert "Age over 60" in out
+    assert "Not met: Age under 18" in out
+
+
+def test_same_16_year_old_gets_a_different_outcome_from_each_rule(capsys, patient_file):
+    data = as_json(negative_child(16, witnessed_loc=PRESENT))
+    result = run_json(capsys, "--json", patient_file(data), rule="all")
+
+    assert result["results"]["cchr"]["outcome"] == "ct_not_required"
+    assert result["results"]["noc"]["outcome"] == "ct_not_required"
+    assert result["results"]["pecarn"]["outcome"] == "observation_or_ct"
+
+
+def test_all_rules_option_runs_a_subset(capsys):
+    result = run_json(capsys, "--rules", "noc,pecarn", rule="all")
+    assert list(result["results"]) == ["noc", "pecarn"]
+
+
+def test_all_rejects_an_unknown_rule_name(capsys):
+    with pytest.raises(SystemExit):
+        main(["all", "--rules", "cchr,nope"])
+    assert "nope" in capsys.readouterr().err
+
+
+def test_all_merged_missing_inputs_name_the_rules_that_need_them(capsys):
+    _, out, _ = run(capsys, "--age-years", "16", rule="all")
+
+    line = next(line for line in out.splitlines() if "--battle-sign" in line)
+    assert "cchr" in line and "pecarn" in line and "noc" not in line
+    headache = next(line for line in out.splitlines() if "--headache" in line)
+    assert "noc" in headache
+
+
+def test_all_ignores_missing_inputs_of_rules_that_do_not_apply(capsys):
+    _, out, _ = run(capsys, "--age-years", "72", rule="all")
+    assert "--severe-headache" not in out  # PECARN only, and PECARN does not apply
+
+
+def test_all_detail_adds_each_rules_full_report(capsys):
+    _, out, _ = run(capsys, "--age-years", "70", "--detail", rule="all")
+    for spec_title in (
+        "Canadian CT Head Rule (Stiell et al., Lancet 2001)",
+        "New Orleans Criteria (Haydel et al., N Engl J Med 2000)",
+        "PECARN (Kuppermann et al., Lancet 2009)",
+    ):
+        assert spec_title in out
+    assert "Panel 1 (p1394)" in out
+
+
+def test_all_offers_every_field_as_a_flag(capsys):
+    all_help = help_text(capsys, "all")
+    for flag in ("--battle-sign", "--headache", "--fall-height-m"):
+        assert flag in all_help
+
+
+def test_all_template_lists_every_field_and_round_trips(capsys, patient_file):
+    _, out, _ = run(capsys, "--template", rule="all")
+    template = json.loads(out)
+    assert list(template) == [f.name for f in dataclasses.fields(Patient)]
+
+    result = run_json(capsys, "--json", patient_file(template), rule="all")
+    assert all(r["outcome"] == "indeterminate" for r in result["results"].values())
