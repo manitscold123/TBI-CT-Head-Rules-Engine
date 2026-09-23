@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+
+# Copyrighted papers: keep local copies, do not redistribute (see sources/README.md)
+sources/*.pdf
